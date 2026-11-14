@@ -804,14 +804,24 @@ function plateFlags() {
 async function mountPlate() {
   const data = { ...plateDims(st.res.rows), flags: plateFlags(), present: new Set(st.res.rows.map(r => r.key).filter(Boolean)) };
   const pick = k => { st.selFinding = null; st.sel = new Set([k]); renderMain(); };
-  if (!webglFailed && !S.getSetting("flatPlate")) {
+  if (!webglFailed && S.getSetting("plate3d")) {
     try {
       if (!plate3d) { const { createPlate } = await import("./plate3d.js"); plate3d = createPlate(plateHost, pick); }
       plate3d.setData(data); plate3d.select([...st.sel]); return;
     } catch (e) { console.warn("3D plate unavailable; using the 2D plate.", e); webglFailed = true; plate3d = null; }
   }
-  plateHost.replaceChildren(plateGrid({ ...data, cls: k => (!data.present.has(k) ? "none" : data.flags.get(k) || "ok") + (st.sel.has(k) ? " sel" : ""),
-    title: k => k, onCell: k => data.present.has(k) && pick(k) }));
+  // Flat plate map, read like an instrument's: each well shows its target and Ct; an open flag tints the well and marks its edge.
+  const byKey = new Map();
+  for (const r of st.res.rows) if (r.key) (byKey.get(r.key) || byKey.set(r.key, []).get(r.key)).push(r);
+  const ctText = r => { const v = C.ctNum(r.ct, r.dc); return v !== null ? v.toFixed(2) : C.isNoAmp(r.ct) ? "Undet" : String(r.ct ?? "").slice(0, 5) || "–"; };
+  const small = data.cols > 12;
+  const label = k => { const rs = byKey.get(k); if (!rs || small) return "";
+    const t = [...new Set(rs.map(r => r.target).filter(Boolean))];
+    return [h("span", { class: "pt" }, (t[0] || "no target").slice(0, 8) + (t.length > 1 ? ` +${t.length - 1}` : "")), h("span", { class: "pv" }, ctText(rs[0]))]; };
+  const title = k => { const rs = byKey.get(k); const f = data.flags.get(k);
+    return rs ? `${k}: ${rs.map(r => `${r.sample ?? "no sample"} · ${r.target ?? "no target"} · Ct ${r.ct ?? "empty"}`).join("; ")}${f ? ` · worst open flag: ${f}` : ""}` : `${k}: not in the file`; };
+  plateHost.replaceChildren(h("div", { class: "pmap-body" + (small ? " p384" : "") }, plateGrid({ ...data, cls: k => (!data.present.has(k) ? "none" : data.flags.get(k) || "ok") + (st.sel.has(k) ? " sel" : ""),
+    label, title, onCell: k => data.present.has(k) && pick(k) })));
 }
 const cap = s => s[0].toUpperCase() + s.slice(1);
 const sevTag = sev => h("span", { class: "sev " + sev }, cap(sev));
@@ -861,7 +871,7 @@ VIEWS.findings = () => {
   const res = st.res;
   if (!res || !st.exp.source) return [emptyCard("Import a results file to run the checks.", "data")];
   const sum = res.summary, sev = sum.bySeverity;
-  plateHost ||= h("div", { class: "plate3d" });
+  plateHost ||= h("div", { class: !webglFailed && S.getSetting("plate3d") ? "plate3d" : "pmap" });
   after.push(mountPlate);
   const q = st.filter.toLowerCase();
   const list = sorted(res.findings).filter(f => (!st.hideClosed || !C.CLOSED.has(st.exp.reviews[f.id]?.disposition)) &&
@@ -902,9 +912,9 @@ VIEWS.findings = () => {
       h("div", { class: "detail-col" },
         sel ? findingDetail(sel) : h("p", { class: "muted pick" }, "Pick a flag on the left to see what was checked and why, or click a well on the plate."),
         h("div", { class: "block" }, h("h3", null, "Plate"), plateHost,
-          h("div", { class: "legend" }, [["high", "High"], ["medium", "Medium"], ["low", "Low"], ["ok", "No open finding"]].map(([k, l]) => h("span", null, h("span", { class: "sw", style: `background:var(--w-${k})` }), l))),
-          h("p", { class: "fine" }, S.getSetting("flatPlate") || webglFailed ? "Each well shows its worst open flag. Click a well to see its rows." : "Each well shows its worst open flag. Drag to rotate, scroll to zoom."),
-          !webglFailed && h("label", { class: "check" }, h("input", { type: "checkbox", checked: !!S.getSetting("flatPlate"), onchange: ev => { try { S.setSetting("flatPlate", ev.target.checked); } catch { /* storage unavailable */ } plate3d = null; plateHost = null; renderMain(); } }), "Flat (2D) plate"),
+          h("div", { class: "legend pmap-legend" }, [["high", "High flag"], ["medium", "Medium flag"], ["low", "Low flag"], ["ok", "No open flag"], ["none", "Not in file"]].map(([k, l]) => h("span", null, h("span", { class: "sq " + k }), l))),
+          h("p", { class: "fine" }, !webglFailed && S.getSetting("plate3d") ? "Each well shows its worst open flag. Drag to rotate, scroll to zoom." : "Each well shows its Ct (and target, when there is room). The corner mark is the well's worst open flag. Hover for details; click a well to see its rows."),
+          !webglFailed && h("label", { class: "check" }, h("input", { type: "checkbox", checked: !!S.getSetting("plate3d"), onchange: ev => { try { S.setSetting("plate3d", ev.target.checked); } catch { /* storage unavailable */ } plate3d = null; plateHost = null; renderMain(); } }), "3D view"),
           selRows.length > 0 && h("div", { class: "tablewrap" }, h("table", { class: "tbl" },
             h("thead", null, h("tr", null, ["Well", "Sample", "Target", "Role", "Ct/Cq as exported", "Line"].map(x => h("th", null, x)))),
             h("tbody", null, selRows.map(r => h("tr", null, h("td", null, r.key), h("td", null, r.sample ?? "—"), h("td", null, r.target ?? "—"), h("td", null, C.ROLE_LABEL[r.role]),

@@ -373,3 +373,33 @@ dialog form { margin-top: 16px; }
 
 /* wells marked Omit in the instrument */
 .pc.omit { border: 2px dashed #5B6762; }
+
+/* Review-step plate map, drawn like an instrument's plate layout: one ruled table, shaded headers, the Ct in each well,
+   and a flag as a small triangle in the well's corner (colour = worst open flag). No tints, gaps, rounding or shadows. */
+.pmap { width: 100%; max-width: 760px; container-type: inline-size; }
+.pmap-body .pgrid { gap: 0; grid-template-columns: 2em repeat(12, minmax(0, 1fr)) !important; border-top: 1px solid #C9D1CD; border-left: 1px solid #C9D1CD; }
+.pmap-body.p384 .pgrid { grid-template-columns: 2em repeat(24, minmax(0, 1fr)) !important; }
+.pmap .pgrid > * { border-right: 1px solid #C9D1CD; border-bottom: 1px solid #C9D1CD; border-radius: 0; }
+.pmap .pgrid > :first-child { background: #EEF1EF; }
+.pmap .pgrid .ph { background: #EEF1EF; font: 500 .7rem/1 var(--mono); color: #3F4A45; padding: 5px 0; }
+.pmap .pgrid .ph:hover { background: #E2E7E4; color: var(--ink); }
+.pmap .pc { position: relative; aspect-ratio: 1.3; min-width: 0; border: 0; border-right: 1px solid #C9D1CD; border-bottom: 1px solid #C9D1CD; border-radius: 0; background: #fff;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; overflow: hidden; padding: 0 2px; }
+.pmap .p384 .pc { aspect-ratio: 1; }
+.pmap .pc .pt { font-size: .62rem; line-height: 1.1; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pmap .pc .pv { font: 400 .72rem/1.1 var(--mono); color: var(--ink); white-space: nowrap; }
+.pmap .pc.none { background: #F6F7F6; cursor: default; }
+.pmap .pc.ok, .pmap .pc.high, .pmap .pc.medium, .pmap .pc.low { background: #fff; }
+.pmap .pc.high::after, .pmap .pc.medium::after, .pmap .pc.low::after, .pmap-legend .sq.high::after, .pmap-legend .sq.medium::after, .pmap-legend .sq.low::after {
+  content: ""; position: absolute; top: 0; right: 0; width: 0; height: 0; border-style: solid; border-width: 0 9px 9px 0; border-color: transparent; }
+.pmap .pc.high::after, .pmap-legend .sq.high::after { border-right-color: var(--high); }
+.pmap .pc.medium::after, .pmap-legend .sq.medium::after { border-right-color: #C77712; }
+.pmap .pc.low::after, .pmap-legend .sq.low::after { border-right-color: #B39A16; }
+.pmap .pgrid .pc:not(.none):hover { outline: 0; background: #F2F5F3; }
+.pmap .pc.sel, .pmap .pgrid .pc.sel:hover { outline: 0; box-shadow: inset 0 0 0 2px var(--ink); background: #fff; }
+@container (max-width: 640px) { .pmap .pc .pt { display: none; } .pmap .pc { aspect-ratio: 1.6; } .pmap .pc .pv { font-size: .66rem; } }
+@container (max-width: 470px) { .pmap .pc .pv { font-size: .56rem; letter-spacing: -.02em; } .pmap .pc.high::after, .pmap .pc.medium::after, .pmap .pc.low::after { border-width: 0 6px 6px 0; } }
+@container (max-width: 340px) { .pmap .pc .pv { display: none; } .pmap .pc { aspect-ratio: 1; } }
+.pmap-legend .sq { position: relative; display: inline-block; width: 14px; height: 11px; margin-right: 7px; border: 1px solid #C9D1CD; background: #fff; overflow: hidden; }
+.pmap-legend .sq.none { background: #F6F7F6; }
+.pmap-legend .sq.high::after, .pmap-legend .sq.medium::after, .pmap-legend .sq.low::after { border-width: 0 7px 7px 0; }
