@@ -1,0 +1,60 @@
+{
+ "pone0339560_NAMPT": {
+  "student": 0.01241241464499487
+ },
+ "pone0339560_NFKB": {
+  "student": 0.00012103199570724172
+ },
+ "pone0339560_PRKCQ": {
+  "student": 0.007598824400019616
+ },
+ "pone0339560_SLC40A": {
+  "student": 0.008720205328118399
+ },
+ "pone0353259_BMDM_DUSP6": {
+  "tukeyModel": {
+   "8-Epi loganic acid": 0.0002690680282845248,
+   "Atractylodin": 6.032633231844997e-07,
+   "Calycosin": 2.9690361280643174e-11,
+   "Cineole": 4.9787951539315145e-12,
+   "Control": 2.8360647164049624e-12,
+   "Loganic acid": 2.2321673507352813e-06
+  }
+ },
+ "pone0353259_BMDM_MAPKAPK2": {
+  "tukeyModel": {
+   "Cineole": 0.0003394577256070619,
+   "Control": 1.3362879669465144e-07,
+   "Paeoniflorin": 0.00010320066804769823
+  }
+ },
+ "pone0353259_BMDM_NOD2": {
+  "tukeyModel": {
+   "Control": 4.9874569141294955e-08,
+   "Secoxyloganin": 1.044713959674759e-05
+  }
+ },
+ "pone0353259_RAW264.7_DUSP6": {
+  "tukeyModel": {
+   "8-Epi loganic acid": 1.0067708796079877e-05,
+   "Atractylodin": 2.3582601316185503e-08,
+   "Calycosin": 5.536249236826052e-11,
+   "Cineole": 1.485546241575264e-09,
+   "Control": 4.0312198024139434e-13,
+   "Loganic acid": 1.6522562773513272e-06
+  }
+ },
+ "pone0353259_RAW264.7_MAPKAPK2": {
+  "tukeyModel": {
+   "Cineole": 0.002234044344916475,
+   "Control": 8.221777441086431e-07,
+   "Paeoniflorin": 2.722096867402435e-05
+  }
+ },
+ "pone0353259_RAW264.7_NOD2": {
+  "tukeyModel": {
+   "Control": 2.7746760156155403e-06,
+   "Secoxyloganin": 7.108103098107943e-05
+  }
+ }
+}

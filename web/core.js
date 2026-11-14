@@ -7,7 +7,7 @@ export const TOOL = "PlateCheck";
 export const APP_VERSION = "0.9.0";
 // Replaced with the commit hash at deploy (tools/stamp.mjs), so every report names the exact code that made it.
 export const BUILD = "dev";
-export const PARSER_VERSION = "0.4.0";
+export const PARSER_VERSION = "0.5.0";
 export const PACKET_VERSION = 1;
 
 export class ParseError extends Error {
@@ -432,7 +432,9 @@ export function toNum(v, dc = false) {
 }
 export const ctNum = (ct, dc = false) => (isNoAmp(ct) ? null : toNum(ct, dc));
 const isNonNumeric = (ct, dc) => !isNoAmp(ct) && ctNum(ct, dc) === null;
-const NTC_NAME_RE = /^(ntc|no[\s_-]?template([\s_-]?control)?|water|h2o|blank)$/i;
+// Also "<target> NTC" / "<target> no template", as LightCycler users name wells ("gapdh no template"). "water" and
+// "blank" only count on their own: at the end of a longer name they could be a treatment.
+const NTC_NAME_RE = /^(ntc|no[\s_-]?template([\s_-]?control)?|water|h2o|blank)$|^\S.*[\s_-](ntc|no[\s_-]?template([\s_-]?control)?)$/i;
 // No-RT controls are usually named after their sample: "c1 noRT", "c1 -RT", "c1_RT-", "NRT c1", "c1 minus RT".
 // Sample names that describe the reaction rather than the biological sample (ChIP, RIP, MeDIP, MSRE layouts).
 const ASSAY_WORD_RE = /^(ip|chip|pull-?down|input|igg|mock( ip)?|no[ -]?ab|beads|digested|undigested|cut|uncut|mock digest)$/i;
@@ -492,14 +494,25 @@ const FIELD_ALIASES = {
   factor2: ["factor2", "factor 2", "second factor"], // two-way ANOVA (analysis module)
   fluor: ["fluor", "reporter", "dye"],
   omit: ["omit"],
+  tm: ["tm", "tm1", "tm (°c)", "tm1 (°c)", "melt temperature", "melting temperature"], // a Tm the instrument reported (no melt file needed)
+  tm2: ["tm2", "tm2 (°c)"],
 };
 export const FIELD_LABEL = { well: "Well", sample: "Sample", target: "Target", ct: "Ct/Cq", role: "Role / task",
-  quantity: "Quantity", group: "Group", bio_unit: "Biological unit", pair: "Pair", factor2: "Second factor", fluor: "Fluorophore", omit: "Omit flag" };
+  quantity: "Quantity", group: "Group", bio_unit: "Biological unit", pair: "Pair", factor2: "Second factor", fluor: "Fluorophore", omit: "Omit flag",
+  tm: "Tm", tm2: "Tm2" };
+// Roche and some other exports name the Ct column after the dye ("Ct SYBR", "Cq FAM", "Cp SYBR Green") or write "CT Value".
+// Only a known dye (or "value") may follow, so summary columns such as "Ct Mean", "Ct SD" or "Ct Threshold" are never
+// taken for the Ct column.
+const CT_DYE_RE = /^(?:ct|cq|cp)[\s_(-]+(?:sybr(?: green(?: i)?)?|fam|vic|hex|joe|tet|rox|cy3|cy5(?:\.5)?|texas red|tamra|eva ?green|lc ?green|resolight|value)\)?$/;
+// Well positions with a run prefix, as some SDS exports write them ("Exp2 A5"): the position is the last word.
+const PREFIXED_WELL_RE = /^(.*\S)\s+([A-Pa-p]0*[1-9]\d?)$/;
+const splitWell = w => { const m = PREFIXED_WELL_RE.exec(String(w ?? "").trim()); return m && wellKey(m[2]) ? { prefix: m[1], key: wellKey(m[2]) } : null; };
 const normHeader = h => String(h ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 function mapHeaders(headers) {
   const norm = headers.map(normHeader), columns = {}, names = {};
   for (const [field, aliases] of Object.entries(FIELD_ALIASES))
     for (const a of aliases) { const i = norm.indexOf(a); if (i >= 0) { columns[field] = i; names[field] = headers[i].trim(); break; } }
+  if (!("ct" in columns)) { const i = norm.findIndex(n => CT_DYE_RE.test(n)); if (i >= 0) { columns.ct = i; names.ct = headers[i].trim(); } }
   const used = new Set(Object.values(columns));
   // The same column name twice (two "Ct" columns, say): the first is used and the parser warns. Different names for one
   // field ("Well" and "Well Position" in QuantStudio files) are expected; the preferred one is chosen by FIELD_ALIASES order.
@@ -560,8 +573,8 @@ export function parseResults(input, opts = {}) {
   const out = [], malformed = [], warnings = [];
   // Footer: summary lines after the last row that has a well position or number (e.g. Slope / R², "Analysis Type").
   // Only a trailing block is cut, so a typo in the middle of the table is still reported, never dropped.
-  const numericWells = !rows.slice(1).some(r => wellKey(r.cells[columns.well]));
-  const wellLike = r => { const w = (r.cells[columns.well] ?? "").trim(); return !!wellKey(w) || (numericWells && /^\d+$/.test(w)); };
+  const numericWells = !rows.slice(1).some(r => wellKey(r.cells[columns.well]) || splitWell(r.cells[columns.well]));
+  const wellLike = r => { const w = (r.cells[columns.well] ?? "").trim(); return !!wellKey(w) || !!splitWell(w) || (numericWells && /^\d+$/.test(w)); };
   let last = rows.length - 1;
   // Summary labels are words ("Average", "Slope"); a mistyped well is short and has a digit ("Z9", "A1O").
   const typoWell = r => { const w = (r.cells[columns.well] ?? "").trim(), c = (r.cells[columns.ct] ?? "").trim();
@@ -578,10 +591,16 @@ export function parseResults(input, opts = {}) {
     }
     const get = f => (f in columns ? (r.cells[columns[f]] ?? "").trim() : "") || null;
     const roleRaw = get("role");
-    out.push({ id: line, line, well: get("well") ?? "", key: wellKey(get("well")), sample: get("sample"), target: get("target"),
+    const sw = wellKey(get("well")) ? null : splitWell(get("well"));
+    out.push({ id: line, line, well: get("well") ?? "", key: wellKey(get("well")) || sw?.key || null, wellPrefix: sw?.prefix ?? null,
+      sample: get("sample"), target: get("target"),
       ct: get("ct"), roleRaw, role: normalizeRole(roleRaw), quantity: get("quantity"), group: get("group"),
-      bio_unit: get("bio_unit"), pair: get("pair"), factor2: get("factor2"), fluor: get("fluor"), omit: /^(true|yes|1)$/i.test(get("omit") || "") });
+      bio_unit: get("bio_unit"), pair: get("pair"), factor2: get("factor2"), fluor: get("fluor"), omit: /^(true|yes|1)$/i.test(get("omit") || ""),
+      tm: get("tm"), tm2: get("tm2") });
   }
+  const prefixed = out.filter(r => r.wellPrefix), prefixes = [...new Set(prefixed.map(r => r.wellPrefix))];
+  if (prefixes.length) warnings.push(`Well positions carry a prefix (${prefixes.map(p => `“${p}”`).join(", ")}), as in “${prefixed[0].well}”. I read the position from the end (${prefixed[0].key}).` +
+    (prefixes.length > 1 ? " Different prefixes usually mean different plates or runs: split the file by prefix and check each plate on its own, or the same position on two plates will be treated as a duplicate." : ""));
   const decimalComma = delim === ";" && out.some(r => /^-?\d+,\d+$/.test(r.ct || ""));
   if (decimalComma) {
     for (const r of out) r.dc = true;
@@ -872,6 +891,8 @@ export function effectiveRows(exp, parsed) {
     else if (sample && NRT_NAME_RE.test(sample.trim()) && (!r.role || r.role === "sample"))
       [role, roleSource] = ["nrt", r.role ? `inferred from sample name (file task '${r.roleRaw}')` : "inferred from sample name"];
     else if (r.role) [role, roleSource] = [r.role, "file"];
+    // Exports that list every plate position (LightCycler, some CFX files) include unused wells with nothing in them.
+    else if (!sample && !target && !r.roleRaw && (r.ct == null || String(r.ct).trim() === "")) [role, roleSource] = ["empty", "inferred (no sample, target or Ct in the file)"];
     else [role, roleSource] = ["sample", r.roleRaw ? `default (file role '${r.roleRaw}' not recognised)` : "default"];
     let [bio_unit, bioSource] = take("bio_unit");
     if (!bio_unit && bioSource !== "user") { bio_unit = sample; bioSource = sample ? "default (sample name)" : null; }
@@ -880,7 +901,7 @@ export function effectiveRows(exp, parsed) {
     if (bioSource === "default (sample name)" && group && ASSAY_WORD_RE.test(sample.trim())) { bio_unit = `${sample.trim()} · ${group}`; bioSource = "default (sample name + group)"; }
     return { id: r.id, line: r.line, well: r.well, key: r.key, ct: r.ct, dc: r.dc, fluor: r.fluor,
       sample, sampleSource, target, targetSource, group, quantity, pair, factor2, role, roleSource, roleRaw: r.roleRaw,
-      fileRoleUnmapped: !!(r.roleRaw && !r.role), bio_unit, bioSource, omit: r.omit,
+      fileRoleUnmapped: !!(r.roleRaw && !r.role), bio_unit, bioSource, omit: r.omit, tm: r.tm ?? null, tm2: r.tm2 ?? null,
       file: { sample: r.sample, target: r.target, group: r.group, role: r.role ?? r.roleRaw, bio_unit: r.bio_unit, quantity: r.quantity, pair: r.pair, factor2: r.factor2 } };
   });
 }
@@ -1198,8 +1219,28 @@ export function analyze(exp) {
         next_check: "Compare this well's curve with its replicates, and check for per-well baseline settings." });
   }
 
+  // Tm reported in the results file itself (a "Tm" / "Tm1" column, and "Tm2" when the software found a second peak).
+  // The instrument already did the melt analysis, so this runs without a melt file and without the melt setting.
+  const tmRows = !exp.melt ? active.filter(r => r.key && r.target && toNum(r.tm, r.dc) !== null) : [];
+  if (tmRows.length) {
+    res.checksRun.push(`Melt temperatures from the results file's Tm column: Tm within ±${v.meltTmTolerance} °C of the target median` + (tmRows.some(r => toNum(r.tm2, r.dc) !== null) ? ", second peak (Tm2) reported" : ""));
+    for (const [t, rs] of groupBy(tmRows.filter(r => ["sample", "positive", "standard"].includes(r.role) && ctNum(r.ct, r.dc) !== null), r => r.target)) {
+      const medTm = median(rs.map(r => toNum(r.tm, r.dc)));
+      for (const r of rs) {
+        const tm = toNum(r.tm, r.dc), tm2 = toNum(r.tm2, r.dc);
+        if (Math.abs(tm - medTm) > v.meltTmTolerance + 1e-9) add("melt_tm_deviation", r.line, { ...at(r),
+          description: `Melt Tm for ${name(r)} is ${tm.toFixed(2)} °C; the median for '${t}' is ${medTm.toFixed(2)} °C.`,
+          evidence: `Tm column ${r.tm}; difference ${(tm - medTm).toFixed(2)} °C; tolerance ±${v.meltTmTolerance} °C`,
+          next_check: tm < medTm - 5 ? "A much lower Tm often means primer-dimer or another short product: check the melt curve, or run the product on a gel." : "Compare with replicates; check whether a different product amplified in this well." });
+        if (tm2 !== null) add("melt_multiple_peaks", r.line, { ...at(r), uncertain: true, description: `Well ${name(r)} has a second melt peak (Tm2 ${tm2.toFixed(1)} °C).`,
+          evidence: `Tm ${r.tm}; Tm2 ${r.tm2} (as reported in the results file; peak heights aren't in the file)`,
+          next_check: "Check for non-specific products or primer-dimer, for example on a gel or with a primer redesign." });
+      }
+    }
+  }
+
   // Melt curves (FR-12): only when configured for the assay
-  if (!exp.melt) res.notAssessed.push("Melt curves: no melt data was provided.");
+  if (!exp.melt) res.notAssessed.push(tmRows.length ? "Melt curves: no melt curve file, so only the Tm values in the results file were checked (no peak heights, no NTC peaks)." : "Melt curves: no melt data was provided.");
   else if (!v.meltChecks) res.notAssessed.push("Melt curves: data was provided, but melt-curve checks are not enabled for this assay (More, then Method details and thresholdses). PlateCheck does not assume melt analysis applies.");
   else {
     const mp = parseCurves(exp.melt.text, "melt"), isDer = exp.melt.valueType !== "fluorescence", ms = {};

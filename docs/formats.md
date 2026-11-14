@@ -32,11 +32,15 @@ Detected layouts:
 - **Bio-Rad CFX “Quantification Cq Results”**: has `Fluor` and `Content` columns; a leading unnamed index column is ignored.
 - **Generic**: anything else with a well and a Ct/Cq column, including Roche LightCycler 480 text exports (`Pos`, `Name`, `Cp`).
 
+Ct columns named after the dye (`Ct SYBR`, `Cq FAM`, `Cp SYBR Green`) or `CT Value` are read as the Ct/Cq column; only known dye names are accepted, so summary columns such as `Ct Mean`, `Ct SD` or `Ct Threshold` never are. Well positions with a run prefix (`Exp2 A5`) are read from the last word, with a warning; several different prefixes in one file usually mean several plates, and the warning says to split the file. Positions listed with no sample, target, role or Ct (LightCycler lists all 96) are treated as empty wells.
+
+A `Tm` / `Tm1` column (and `Tm2` when the software reports a second peak) is read too. Without a melt-curve file, each product well's Tm is compared with its target's median (the same ±1 °C tolerance as melt curves), and a reported Tm2 is flagged as a possible second product. Peak heights and NTC peaks need the melt-curve file.
+
 Numeric wells: if the well column holds numbers (SDS 2.x), they are converted row by row using the plate size stated in the file, 384 if any number exceeds 96, or the size the user chooses in the preview (`--plate-size` in the CLI). The size is never guessed.
 
 Numbers: in semicolon-separated files, decimal commas (`24,31`) are read as decimals. Thousands separators in quantities (`12,963.927`) are accepted. Raw strings are stored unchanged.
 
-Role values: `Unkn…`/`Unknown`/`Sample` → sample, `NTC`/`No template…` → NTC, `Std…`/`Standard` → standard, `Pos…` → positive, `NRT`/`No RT`/`-RT`/`NAC` → no-RT, `Empty`/`Unused` → empty. Other values (such as `Neg Ctrl`) are not mapped and are flagged. Samples named `NTC`, `water`, `H2O`, `blank` or `no template control` are treated as NTC, and samples whose name marks them as a no-RT control (`c1 noRT`, `c1 -RT`, `c1 RT-`, `NRT c1`, `c1 no-RT control`, `c1 minus RT`) are treated as no-RT, when there is no role column or the role is “Unknown”. The Plate page asks you to confirm these guesses; the source of the role is shown in the preview, plate map and report.
+Role values: `Unkn…`/`Unknown`/`Sample` → sample, `NTC`/`No template…` → NTC, `Std…`/`Standard` → standard, `Pos…` → positive, `NRT`/`No RT`/`-RT`/`NAC` → no-RT, `Empty`/`Unused` → empty. Other values (such as `Neg Ctrl`) are not mapped and are flagged. Samples named `NTC`, `water`, `H2O`, `blank` or `no template control`, or ending in `NTC` / `no template` after a target name (`gapdh no template`), are treated as NTC, and samples whose name marks them as a no-RT control (`c1 noRT`, `c1 -RT`, `c1 RT-`, `NRT c1`, `c1 no-RT control`, `c1 minus RT`) are treated as no-RT, when there is no role column or the role is “Unknown”. The Plate page asks you to confirm these guesses; the source of the role is shown in the preview, plate map and report.
 
 No-amplification markers: empty, `Undetermined`, `NaN`, `N/A`, `NA`, `No Ct`, `No Cq`, `-`, `None`, `No Amp`. Any other non-numeric value is kept and flagged.
 

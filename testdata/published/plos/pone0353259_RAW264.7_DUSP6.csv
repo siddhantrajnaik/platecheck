@@ -1,0 +1,43 @@
+unit,group,target,ct
+Control-1,Control,RPS18,16.329
+Control-1,Control,DUSP6,21.313
+Control-2,Control,RPS18,16.341
+Control-2,Control,DUSP6,21.407
+Control-3,Control,RPS18,16.333
+Control-3,Control,DUSP6,21.396
+Model-1,Model,RPS18,15.943
+Model-1,Model,DUSP6,19.422
+Model-2,Model,RPS18,15.899
+Model-2,Model,DUSP6,19.343
+Model-3,Model,RPS18,15.921
+Model-3,Model,DUSP6,19.237
+Calycosin-1,Calycosin,RPS18,16.013
+Calycosin-1,Calycosin,DUSP6,20.539
+Calycosin-2,Calycosin,RPS18,16.022
+Calycosin-2,Calycosin,DUSP6,20.656
+Calycosin-3,Calycosin,RPS18,15.998
+Calycosin-3,Calycosin,DUSP6,20.48
+Loganic acid-1,Loganic acid,RPS18,16.033
+Loganic acid-1,Loganic acid,DUSP6,19.973
+Loganic acid-2,Loganic acid,RPS18,15.989
+Loganic acid-2,Loganic acid,DUSP6,19.951
+Loganic acid-3,Loganic acid,RPS18,16.002
+Loganic acid-3,Loganic acid,DUSP6,19.888
+8-Epi loganic acid-1,8-Epi loganic acid,RPS18,15.907
+8-Epi loganic acid-1,8-Epi loganic acid,DUSP6,19.711
+8-Epi loganic acid-2,8-Epi loganic acid,RPS18,15.898
+8-Epi loganic acid-2,8-Epi loganic acid,DUSP6,19.815
+8-Epi loganic acid-3,8-Epi loganic acid,RPS18,15.899
+8-Epi loganic acid-3,8-Epi loganic acid,DUSP6,19.75
+Atractylodin-1,Atractylodin,RPS18,15.909
+Atractylodin-1,Atractylodin,DUSP6,19.984
+Atractylodin-2,Atractylodin,RPS18,15.912
+Atractylodin-2,Atractylodin,DUSP6,20.137
+Atractylodin-3,Atractylodin,RPS18,15.897
+Atractylodin-3,Atractylodin,DUSP6,20.0
+Cineole-1,Cineole,RPS18,16.095
+Cineole-1,Cineole,DUSP6,20.388
+Cineole-2,Cineole,RPS18,16.082
+Cineole-2,Cineole,DUSP6,20.426
+Cineole-3,Cineole,RPS18,16.102
+Cineole-3,Cineole,DUSP6,20.371
