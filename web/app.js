@@ -434,7 +434,7 @@ function preview(kind, p) {
   if (p.error) return h("div", { class: "preview bad" },
     h("b", null, `Could not import ${p.name}. No checks were run.`), sheetPicker(kind, p), h("p", null, p.error),
     p.details.headers?.length > 0 && h("p", { class: "muted" }, "Columns found: " + p.details.headers.join(", ")),
-    p.details.recognized && Object.keys(p.details.recognized).length > 0 && h("p", { class: "muted" }, "Recognised: " + Object.entries(p.details.recognized).map(([k, v]) => `${C.FIELD_LABEL[k]} ← “${v}”`).join(", ")),
+    p.details.recognized && Object.keys(p.details.recognized).length > 0 && h("p", { class: "muted" }, "Recognised: " + Object.entries(p.details.recognized).map(([k, v]) => `${C.FIELD_LABEL[k] || k} ← “${v}”`).join(", ")),
     p.details.needsPlateSize && h("div", { class: "row" }, h("b", null, "Plate layout:"),
       [96, 384].filter(n => n >= p.details.maxWell).map(n => h("button", { class: "btn primary", type: "button", onclick: () => stageText(kind, p.name, p.text, n, { workbook: p.workbook, sheets: p.sheets }) }, `${n}-well (row by row)`)),
       h("small", { class: "muted" }, "Pick the plate your instrument used. The preview will show the resulting positions so you can check them.")),
@@ -460,7 +460,7 @@ function preview(kind, p) {
   const roles = C.groupBy(r.rows.filter(x => x.role), x => x.role);
   const inferredNtc = r.rows.filter(x => !x.role && x.sample && /^(ntc|no[\s_-]?template([\s_-]?control)?|water|h2o|blank)$/i.test(x.sample)).length;
   return h("div", { class: "preview" }, h("b", null, `Preview of ${p.name}. Check it before importing.`), sheetPicker(kind, p),
-    kv([["Detected format", r.formatLabel], ["Columns used", Object.entries(r.columns).map(([k, v]) => `${C.FIELD_LABEL[k]} ← “${v}”`).join(", ")],
+    kv([["Detected format", r.formatLabel], ["Columns used", Object.entries(r.columns).map(([k, v]) => `${C.FIELD_LABEL[k] || k} ← “${v}”`).join(", ")],
       ["Columns not used", r.unrecognized.join(", ")], ["Rows parsed", String(r.rows.length)],
       ["Distinct wells", `${new Set(keys).size}` + (r.rows.length - keys.length ? `; ${r.rows.length - keys.length} row(s) with an invalid position` : "")],
       ["Targets", [...new Set(r.rows.map(x => x.target).filter(Boolean))].join(", ")],
@@ -487,7 +487,7 @@ VIEWS.data = () => {
           cur.plateSize && ["Plate", `${cur.plateSize}-well`], cur.valueType && ["Melt values", cur.valueType],
           ["Checksum", h("span", { class: "mono", title: "SHA-256 of the file as imported" }, cur.sha256)]]),
         kind === "results" && st.res?.parsed && h("details", { class: "what-read", open: st.quick?.id === st.exp.id }, h("summary", null, "What was read from this file"),
-          kv([["Columns used", Object.entries(st.res.parsed.columns).map(([k, v]) => `${C.FIELD_LABEL[k]} from “${v}”`).join(", ")],
+          kv([["Columns used", Object.entries(st.res.parsed.columns).map(([k, v]) => `${C.FIELD_LABEL[k] || k} from “${v}”`).join(", ")],
             st.res.parsed.unrecognized.length && ["Columns ignored", st.res.parsed.unrecognized.join(", ")],
             ["Wells", `${st.res.rows.length} rows, ${new Set(st.res.rows.map(r => r.key).filter(Boolean)).size} wells`],
             ["Targets", [...new Set(st.res.rows.map(r => r.target).filter(Boolean))].join(", ") || "none named"],

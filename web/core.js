@@ -499,7 +499,7 @@ const FIELD_ALIASES = {
   tm2: ["tm2", "tm2 (°c)"],
 };
 export const FIELD_LABEL = { well: "Well", sample: "Sample", target: "Target", ct: "Ct/Cq", role: "Role / task",
-  quantity: "Quantity", group: "Group", bio_unit: "Biological unit", pair: "Pair", factor2: "Second factor", fluor: "Fluorophore", omit: "Omit flag",
+  quantity: "Quantity", group: "Group", bio_unit: "Biological unit", pair: "Pair", factor2: "Second factor", fluor: "Fluorophore", omit: "Omit flag", include: "Include flag",
   tm: "Tm", tm2: "Tm2" };
 // Roche and some other exports name the Ct column after the dye ("Ct SYBR", "Cq FAM", "Cp SYBR Green") or write "CT Value".
 // Only a known dye (or "value") may follow, so summary columns such as "Ct Mean", "Ct SD" or "Ct Threshold" are never
