@@ -23,7 +23,8 @@ const run = (rows, genes, groups, refs, control, test = "welch") => {
 test("Livak & Schmittgen 2001 example: kidney vs brain c-myc matches the published table", () => {
   const a = run(CT1, ["c_myc", "GAPDH"], [...Array(6).fill("brain"), ...Array(6).fill("kidney")], ["GAPDH"], "brain");
   const k = a.summary.find(r => r.target === "c_myc" && r.group === "kidney"), b = a.summary.find(r => r.target === "c_myc" && r.group === "brain");
-  assert.equal(b.meanDct.toFixed(2), "6.86"); assert.ok(Math.abs(k.meanDct - 4.37) < 0.006); // 4.365, printed as 4.37 assert.equal(k.meanDdct.toFixed(2), "-2.50");
+  assert.equal(b.meanDct.toFixed(2), "6.86"); assert.ok(Math.abs(k.meanDct - 4.37) < 0.006); // 4.365, printed as 4.37
+  assert.ok(Math.abs(k.meanDdct - -2.50) < 0.006);
   assert.equal(k.fold.toFixed(1), "5.6");
 });
 test("pcr ct4 (12 vs 12): estimate -0.6848 as published; p values and CI equal R's t.test / wilcox.test", () => {
@@ -46,4 +47,61 @@ test("Auto-qPCR example QuantStudio export: fold changes equal QuantStudio's own
   for (const l of text.split(/\r?\n/)) { const c = l.split(","); if (!/^\d+$/.test(c[0]) || !c[11] || ["ACTB", "GAPDH"].includes(c[4])) continue;
     const s = a.summary.find(r => r.target === c[4] && r.group === c[3]); assert.ok(Math.abs(s.fold - +c[11]) < Math.max(6e-4, 1e-3 * +c[11]), `${c[4]} ${c[3]}: ${s.fold} vs ${c[11]}`); checked++; }
   assert.ok(checked >= 30);
+});
+
+// 4. Yuan et al. 2006, BMC Bioinformatics, doi:10.1186/1471-2105-7-85, Table 3: the same 24 Ct pairs (MT7 target, ubiquitin
+//    reference). Published t-test: ΔΔCt -0.6848, SE 0.1303, 95% CI (-0.955, -0.4147) — the Student (pooled) interval.
+test("Yuan 2006 Table 3 t-test: estimate, standard error and CI as published", () => {
+  const rows = CT4.split("|").map(x => x.split(",").map(Number)), g = [...Array(12).fill("control"), ...Array(12).fill("treatment")];
+  const s = run(rows, ["ubiquitin", "MT7"], g, ["ubiquitin"], "control", "student").summary.find(r => r.group === "treatment" && r.target === "MT7");
+  assert.equal(s.meanDdct.toFixed(4), "-0.6848");
+  const se = Math.abs(s.meanDdct / s.t), h = 2.0738730679 * se; // pooled SE from Student's t; t(0.975, 22)
+  assert.equal(se.toFixed(4), "0.1303");
+  assert.equal((s.meanDdct - h).toFixed(3), "-0.955"); assert.equal((s.meanDdct + h).toFixed(4), "-0.4147");
+  // PlateCheck's own "vs control" CI is Welch's (labelled so), as R's default t.test: (-0.9560, -0.4137).
+});
+
+const PUB = n => new URL(`../testdata/published/${n}`, import.meta.url);
+const generic = (title, lines, settings) => {
+  const e = C.newExperiment({ title }, "qa"); e.source = C.fileRecord({ name: title, text: lines.join("\n") + "\n", sha: "x", actor: "qa", format: "generic-ct-csv" });
+  e.analysis = C.cleanAnalysisSettings({ on: true, ...settings }); return A.analyzeRun(e, C.analyze(e)); };
+const well = k => `${"ABCDEFGHIJKLMNOP"[Math.floor(k / 24)]}${k % 24 + 1}`;
+
+// 5. Lee et al. 2020, F1000Research, doi:10.12688/f1000research.23580.2; authors' raw data on Figshare. APOE vs GAPDH, 4 days,
+//    3 biological x 2 technical replicates per lineage. ΔCt must equal the authors' column for every unit; one-way ANOVA on
+//    unit ΔCt equals scipy.stats.f_oneway (SciPy 1.18.1). Authors' normalised values use an arithmetic D7 mean, so they differ
+//    from PlateCheck's by a constant factor per lineage (checked: one factor per lineage, not asserted to a published value).
+test("Lee 2020 raw data: ΔCt equals the authors' for all 36 units; ANOVA equals SciPy", () => {
+  const lines = readFileSync(PUB("lee2020_raw_qpcr.csv"), "utf8").trim().split(/\r?\n/).slice(1).map(l => C.splitDelimited(l)[0].cells);
+  const scipy = { DSi: 1.8071893668107062e-05, "DS-Wi": 6.419390796499844e-06, "DS-WHi": 0.0013640812714631769 };
+  let units = 0;
+  for (const lin of Object.keys(scipy)) {
+    const L = ["Well,Sample,Target,Ct,Group,Biological unit"], authors = {}; let w = 0;
+    for (const c of lines.filter(c => c[0].split("_")[0] === lin)) { const [, day, bio] = c[0].split("_"), unit = `${day} ${bio}`;
+      for (const [t, ct] of [["APOE", c[1]], ["GAPDH", c[2]]]) L.push(`${well(w++)},${unit},${t},${ct},${day},${unit}`);
+      if (c[9]) authors[unit] = { norm: +c[9], dct: +c[7] }; }
+    const a = generic(lin, L, { refs: ["GAPDH"], control: "D7", test: "tukey" }), ratios = [];
+    for (const r of a.rows.filter(r => r.target === "APOE")) {
+      assert.ok(Math.abs(r.dct + authors[r.unit].dct) < 1e-9, `${lin} ${r.unit}`); ratios.push(authors[r.unit].norm / r.fold); units++; }
+    assert.ok(Math.max(...ratios) - Math.min(...ratios) < 1e-6, `${lin}: one constant factor`);
+    assert.ok(Math.abs(a.anova.find(x => x.target === "APOE").p / scipy[lin] - 1) < 1e-9, lin);
+  }
+  assert.equal(units, 36);
+});
+
+// 6. Heffer et al. 2020, PLOS ONE, doi:10.1371/journal.pone.0243626: 6 genes vs Gapdh, 4 groups of 4-5 eyes, one-way ANOVA +
+//    Tukey. PlateCheck's Tukey on ΔCt equals scipy.stats.tukey_hsd. The paper's fold changes (~5, ~3, 2.3, 1.7, 4.7 for
+//    Fn1, Col1a1, Acta2, TgfB, Tnfa) are arithmetic means of per-eye 2^-ΔΔCt (4.98, 3.07, 2.27, 1.74, 4.52 here) with Tukey on
+//    that scale, so they are compared in papers/RESULTS.md, not here.
+test("Heffer 2020: Tukey p values on ΔCt equal SciPy for every gene", () => {
+  const raw = readFileSync(PUB("data_Heffer2020PlosOne.csv"), "utf8").replace(/^﻿/, "").trim().split(/\r?\n/).map(l => l.split(","));
+  const genes = ["Fn1", "Col1a1", "Acta2", "TgfB", "Tnfa", "Mcp1", "Gapdh"], L = ["Well,Sample,Target,Ct,Group,Biological unit"]; let w = 0;
+  for (const c of raw.slice(1)) for (const g of genes) L.push(`${well(w++)},${c[0]}-${c[1]},${g},${c[raw[0].indexOf("Ct." + g)]},${c[0]},${c[0]}-${c[1]}`);
+  const a = generic("heffer", L, { refs: ["Gapdh"], control: "Uninjected", test: "tukey" });
+  // scipy.stats.tukey_hsd on ΔCt (SciPy 1.18.1), DMSO+RPE vs uninjected and DMSO+RPE vs SNC+RPE
+  const ref = { Fn1: [0.01064, 0.03514], Col1a1: [0.06339, 0.06138], Acta2: [0.1282, 0.2486], TgfB: [0.03872, 0.002732], Tnfa: [0.0007879, 0.3722], Mcp1: [0.0004637, 0.005339] };
+  const p = (t, x, y) => a.pairwise.find(r => r.target === t && new Set([r.a, r.b]).has(x) && new Set([r.a, r.b]).has(y)).p;
+  for (const [t, [u, s]] of Object.entries(ref)) {
+    assert.equal(+p(t, "DMSORPE", "Uninjected").toPrecision(4), u, t); assert.equal(+p(t, "DMSORPE", "SNCRPE").toPrecision(4), s, t); }
+  assert.equal(a.summary.find(r => r.target === "Fn1" && r.group === "DMSORPE").fold.toFixed(3), "4.145");
 });
