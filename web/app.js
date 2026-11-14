@@ -810,18 +810,26 @@ async function mountPlate() {
       plate3d.setData(data); plate3d.select([...st.sel]); return;
     } catch (e) { console.warn("3D plate unavailable; using the 2D plate.", e); webglFailed = true; plate3d = null; }
   }
-  // Flat plate map, read like an instrument's: each well shows its target and Ct; an open flag tints the well and marks its edge.
+  // Flat plate map, read like an instrument's: round wells tinted by target, the Ct written in, and a thick ring in the colour of
+  // the well's worst open flag.
   const byKey = new Map();
   for (const r of st.res.rows) if (r.key) (byKey.get(r.key) || byKey.set(r.key, []).get(r.key)).push(r);
   const ctText = r => { const v = C.ctNum(r.ct, r.dc); return v !== null ? v.toFixed(2) : C.isNoAmp(r.ct) ? "Undet" : String(r.ct ?? "").slice(0, 5) || "–"; };
   const small = data.cols > 12;
-  const label = k => { const rs = byKey.get(k); if (!rs || small) return "";
-    const t = [...new Set(rs.map(r => r.target).filter(Boolean))];
-    return [h("span", { class: "pt" }, (t[0] || "no target").slice(0, 8) + (t.length > 1 ? ` +${t.length - 1}` : "")), h("span", { class: "pv" }, ctText(rs[0]))]; };
+  const tones = targetTones();
+  const label = k => { const rs = byKey.get(k); return !rs || small ? "" : h("span", { class: "pv" }, ctText(rs[0])); };
+  const style = k => { const t = byKey.get(k)?.[0]?.target, c = t && tones.get(t); return c ? `--tbg:${c[0]};--tfg:${c[1]}` : ""; };
   const title = k => { const rs = byKey.get(k); const f = data.flags.get(k);
     return rs ? `${k}: ${rs.map(r => `${r.sample ?? "no sample"} · ${r.target ?? "no target"} · Ct ${r.ct ?? "empty"}`).join("; ")}${f ? ` · worst open flag: ${f}` : ""}` : `${k}: not in the file`; };
   plateHost.replaceChildren(h("div", { class: "pmap-body" + (small ? " p384" : "") }, plateGrid({ ...data, cls: k => (!data.present.has(k) ? "none" : data.flags.get(k) || "ok") + (st.sel.has(k) ? " sel" : ""),
-    label, title, onCell: k => data.present.has(k) && pick(k) })));
+    label, title, style, onCell: k => data.present.has(k) && pick(k) })));
+}
+// Pale fill + dark text per target, in order of first appearance (cycles after seven targets).
+const TARGET_TONES = [["#DDF2EA", "#0B5442"], ["#ECEAFB", "#3C3489"], ["#F6EBD5", "#6A4A0F"], ["#E3EEF9", "#0C447C"], ["#F8E6EE", "#72243E"], ["#E8F1DC", "#27500A"], ["#ECEBE6", "#444441"]];
+function targetTones() {
+  const m = new Map();
+  for (const r of st.res?.rows || []) if (r.target && !m.has(r.target)) m.set(r.target, TARGET_TONES[m.size % TARGET_TONES.length]);
+  return m;
 }
 const cap = s => s[0].toUpperCase() + s.slice(1);
 const sevTag = sev => h("span", { class: "sev " + sev }, cap(sev));
@@ -912,8 +920,9 @@ VIEWS.findings = () => {
       h("div", { class: "detail-col" },
         sel ? findingDetail(sel) : h("p", { class: "muted pick" }, "Pick a flag on the left to see what was checked and why, or click a well on the plate."),
         h("div", { class: "block" }, h("h3", null, "Plate"), plateHost,
-          h("div", { class: "legend pmap-legend" }, [["high", "High flag"], ["medium", "Medium flag"], ["low", "Low flag"], ["ok", "No open flag"], ["none", "Not in file"]].map(([k, l]) => h("span", null, h("span", { class: "sq " + k }), l))),
-          h("p", { class: "fine" }, !webglFailed && S.getSetting("plate3d") ? "Each well shows its worst open flag. Drag to rotate, scroll to zoom." : "Each well shows its Ct (and target, when there is room). The corner mark is the well's worst open flag. Hover for details; click a well to see its rows."),
+          h("div", { class: "legend pmap-legend" }, [...targetTones()].slice(0, 7).map(([t, [bg]]) => h("span", null, h("span", { class: "sq", style: `background:${bg}` }), t)),
+            [["high", "High flag"], ["medium", "Medium flag"], ["low", "Low flag"], ["none", "Not in file"]].map(([k, l]) => h("span", null, h("span", { class: "sq " + k }), l))),
+          h("p", { class: "fine" }, !webglFailed && S.getSetting("plate3d") ? "Each well shows its worst open flag. Drag to rotate, scroll to zoom." : "Wells are tinted by target and show the Ct. A coloured ring is the well's worst open flag. Hover for details; click a well to see its rows."),
           !webglFailed && h("label", { class: "check" }, h("input", { type: "checkbox", checked: !!S.getSetting("plate3d"), onchange: ev => { try { S.setSetting("plate3d", ev.target.checked); } catch { /* storage unavailable */ } plate3d = null; plateHost = null; renderMain(); } }), "3D view"),
           selRows.length > 0 && h("div", { class: "tablewrap" }, h("table", { class: "tbl" },
             h("thead", null, h("tr", null, ["Well", "Sample", "Target", "Role", "Ct/Cq as exported", "Line"].map(x => h("th", null, x)))),
