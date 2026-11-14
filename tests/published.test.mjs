@@ -105,3 +105,33 @@ test("Heffer 2020: Tukey p values on ΔCt equal SciPy for every gene", () => {
     assert.equal(+p(t, "DMSORPE", "Uninjected").toPrecision(4), u, t); assert.equal(+p(t, "DMSORPE", "SNCRPE").toPrecision(4), s, t); }
   assert.equal(a.summary.find(r => r.target === "Fn1" && r.group === "DMSORPE").fold.toFixed(3), "4.145");
 });
+
+// 7. pcr ct3 dilution series (PeerJ 2018, Table 1 / Fig 1) as standards, ct1 brain/kidney as samples, one plate. Standard curves equal
+//    base R lm(Ct ~ log10(amount)); the efficiency-corrected (Pfaffl) kidney/brain ratio equals R's E_t^ΔCt_t / E_r^ΔCt_r, and is
+//    close to the paper's standard-curve result, 5.5 (Table 3; that method averages amounts arithmetically, R gives 5.461 for it).
+test("pcr standard curves and Pfaffl ratio equal base R; ratio close to the paper's 5.5", () => {
+  const ct3 = readFileSync(PUB("pcr_ct3.csv"), "utf8").trim().split(/\r?\n/).slice(1).map(l => l.split(","));
+  const amt = [1, .5, .2, .1, .05, .02, .01].flatMap(a => [a, a, a]), L = ["Well,Sample,Target,Task,Quantity,Ct,Group"]; let w = 0;
+  ct3.forEach((r, i) => [["c_myc", r[0]], ["GAPDH", r[1]]].forEach(([g, ct]) => L.push(`${well(w++)},STD-${amt[i]},${g},STANDARD,${amt[i]},${ct},`)));
+  CT1.forEach((r, i) => [["c_myc", r[0]], ["GAPDH", r[1]]].forEach(([g, ct]) => L.push(`${well(w++)},${i < 6 ? "brain" : "kidney"}-${i + 1},${g},UNKNOWN,,${ct},${i < 6 ? "brain" : "kidney"}`)));
+  const e = C.newExperiment({ title: "curves" }, "qa"); e.source = C.fileRecord({ name: "c", text: L.join("\n") + "\n", sha: "x", actor: "qa", format: "generic-ct-csv" });
+  const res = C.analyze(e);
+  const R = { c_myc: [-3.3880951819, 25.6966912801, 0.9965504211, 97.31090754], GAPDH: [-3.4145513738, 22.6822113565, 0.9990278221, 96.27466376] }; // R 4.3.2
+  for (const [t, [sl, ic, r2, eff]] of Object.entries(R)) { const c = res.stdCurves.find(x => x.target === t);
+    assert.ok(Math.abs(c.slope - sl) < 1e-9 && Math.abs(c.intercept - ic) < 1e-9 && Math.abs(c.r2 - r2) < 1e-9 && Math.abs(c.efficiency - eff) < 1e-7, t); }
+  e.analysis = C.cleanAnalysisSettings({ on: true, refs: ["GAPDH"], control: "brain", efficiency: true });
+  const k = A.analyzeRun(e, res).summary.find(r => r.target === "c_myc" && r.group === "kidney");
+  assert.ok(Math.abs(k.fold - 5.4778330527) < 1e-9); assert.equal(k.fold.toFixed(1), "5.5");
+});
+
+// 8. Two-way ANOVA (group x second factor, with interaction) on a balanced design equals R 4.3.2 anova(lm(dCt ~ Concentration * Type)).
+test("two-way ANOVA with interaction equals R on a balanced 3 x 2 design", () => {
+  const rows = readFileSync(PUB("data_2factorBlock.csv"), "utf8").replace(/^﻿/, "").trim().split(/\r?\n/).slice(1).map(l => l.split(","));
+  const L = ["Well,Sample,Target,Ct,Group,Factor2,Biological unit"]; let w = 0;
+  for (const c of rows) { const u = `${c[0]}-${c[1]}-${c[3]}`; for (const [g, ct] of [["PO", c[5]], ["GAPDH", c[7]]]) L.push(`${well(w++)},${u},${g},${ct},${c[1]},${c[0]},${u}`); }
+  const tw = generic("2f", L, { refs: ["GAPDH"], control: "L0", twoWay: "factor2" }).twoWay.find(x => x.target === "PO");
+  const R = { group: [12.95303333333, 41.39378, 4.117e-06], second: [3.05045, 19.49654, 0.00084222], interaction: [4.54543333333, 14.52576, 0.00062390] };
+  for (const [k, [ss, F, p]] of Object.entries(R)) {
+    assert.ok(Math.abs(tw[k].ss - ss) < 1e-9, k); assert.ok(Math.abs(tw[k].F - F) < 1e-5, k); assert.equal(+tw[k].p.toPrecision(4), +p.toPrecision(4), k); }
+  assert.ok(Math.abs(tw.residual.ss - 1.87753333333) < 1e-9 && tw.residual.df === 12);
+});
