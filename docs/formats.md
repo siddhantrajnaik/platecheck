@@ -28,9 +28,11 @@ The header row is found anywhere in the first 500 lines (the first row with both
 
 Detected layouts:
 - **Thermo QuantStudio**: text export with `* key = value` lines and `[Results]`, or CSV with a key,value preamble (`Block Type`, …). `Omit` flags are kept and reported.
-- **Applied Biosystems SDS** (7000/7300/7500/7900HT, SDS 1.x/2.x): text with a preamble and `Detector` / `Detector Name` columns.
+- **Applied Biosystems SDS** (7000/7300/7500/7900HT, SDS 1.x/2.x): text with a preamble and `Detector` / `Detector Name` columns. The SDS 1.x “Ct” export, which has one block per detector (`Detector,Reporter,…` / values / `Well,SampleName,Ct` / rows), is read block by block, with the detector name as the target. The SDS 1.x melt export (rows of readings under `Well, Temperatures …`, `Well, Raw Data …`, `Well, Derivative Data …` per detector) is read as melt curves; its numbered wells take the results file's plate size.
 - **Bio-Rad CFX “Quantification Cq Results”**: has `Fluor` and `Content` columns; a leading unnamed index column is ignored.
-- **Generic**: anything else with a well and a Ct/Cq column, including Roche LightCycler 480 text exports (`Pos`, `Name`, `Cp`).
+- **Generic**: anything else with a well and a Ct/Cq column, including Roche LightCycler 480 text exports (`Pos`, `Name`, `Cp`; `Include` = FALSE is treated like QuantStudio's Omit).
+
+Excel workbooks: each sheet is classified as results, amplification or melt, and the instrument-named sheet is preferred. Newer QuantStudio workbooks have no Quantity column on “Results”; when another sheet (“Standard Curve Result”) repeats every well with the same Cq and also has the standards' quantities, that sheet is used and the upload note says why.
 
 Ct columns named after the dye (`Ct SYBR`, `Cq FAM`, `Cp SYBR Green`) or `CT Value` are read as the Ct/Cq column; only known dye names are accepted, so summary columns such as `Ct Mean`, `Ct SD` or `Ct Threshold` never are. Well positions with a run prefix (`Exp2 A5`) are read from the last word, with a warning; several different prefixes in one file usually mean several plates, and the warning says to split the file. Positions listed with no sample, target, role or Ct (LightCycler lists all 96) are treated as empty wells.
 

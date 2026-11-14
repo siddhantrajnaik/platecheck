@@ -286,7 +286,7 @@ async function quickFiles(fileList) {
   const label = i => (!i.workbook ? i.name : i !== r && i.workbook.name === r.workbook?.name ? `sheet “${i.workbook.sheet}”` : `${i.workbook.name}, sheet “${i.workbook.sheet}”`);
   st.quick = { id: e.id, files: [r, ...items.filter(i => i.kind === "amp" || i.kind === "melt")].map(label), skipped: unread.map(u => u.name),
     rows: r.parsed?.rows.length, format: r.parsed && C.FORMATS[r.parsed.format], melt: e.melt?.valueType,
-    otherSheets: r.alternatives?.length ? { used: r.workbook.sheet, others: r.alternatives } : null };
+    otherSheets: r.alternatives?.length ? { used: r.workbook.sheet, others: r.alternatives, why: r.why || null } : null };
   st.tab = r.needsPlateSize ? "data" : "findings";
   reanalyze(); persist(); render(); scrollTo(0, 0);
 }
@@ -296,7 +296,7 @@ function quickNote() {
   return h("div", { class: "quick-note" },
     h("p", null, `Read ${q.rows} rows from ${q.files[0]}` + (q.files.length > 1 ? `, plus the curves in ${q.files.slice(1).join(" and ")}` : "") + "." +
       (q.melt ? ` Melt values were read as ${q.melt}; if that's wrong, change it on the Upload page.` : "") + (q.skipped.length ? ` I couldn't read ${q.skipped.join(", ")}, so it was left out.` : "")),
-    q.otherSheets && h("p", { class: "warn-line" }, `Check the sheet: this workbook has other sheets that also look like results (${q.otherSheets.others.map(s => `“${s}”`).join(", ")}). I used “${q.otherSheets.used}”. If that's the wrong one, open the Upload page, click Replace and pick the right sheet.`),
+    q.otherSheets?.why ? h("p", { class: "warn-line" }, q.otherSheets.why) : q.otherSheets && h("p", { class: "warn-line" }, `Check the sheet: this workbook has other sheets that also look like results (${q.otherSheets.others.map(s => `“${s}”`).join(", ")}). I used “${q.otherSheets.used}”. If that's the wrong one, open the Upload page, click Replace and pick the right sheet.`),
     h("div", { class: "row" },
       h("button", { class: "link", type: "button", onclick: () => goTab("data") }, "See what was read"),
       h("button", { class: "link", type: "button", onclick: () => { S.remove(st.exp.id); st.quick = null; goHome(); } }, "Undo"),

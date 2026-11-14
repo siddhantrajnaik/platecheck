@@ -7,7 +7,7 @@ export const TOOL = "PlateCheck";
 export const APP_VERSION = "0.9.0";
 // Replaced with the commit hash at deploy (tools/stamp.mjs), so every report names the exact code that made it.
 export const BUILD = "dev";
-export const PARSER_VERSION = "0.5.0";
+export const PARSER_VERSION = "0.6.0";
 export const PACKET_VERSION = 1;
 
 export class ParseError extends Error {
@@ -483,7 +483,7 @@ export function splitDelimited(text, delim = detectDelimiter(text)) {
 
 const FIELD_ALIASES = {
   well: ["well position", "well", "pos", "position"],
-  sample: ["sample", "sample name", "name"],
+  sample: ["sample", "sample name", "samplename", "name"],
   target: ["target", "target name", "detector", "detector name", "gene", "assay"],
   ct: ["ct", "cq", "cт", "c_t", "crt", "cp"],
   role: ["role", "task", "content", "type"],
@@ -494,6 +494,7 @@ const FIELD_ALIASES = {
   factor2: ["factor2", "factor 2", "second factor"], // two-way ANOVA (analysis module)
   fluor: ["fluor", "reporter", "dye"],
   omit: ["omit"],
+  include: ["include"], // LightCycler: FALSE = excluded on the instrument, reported like QuantStudio's Omit
   tm: ["tm", "tm1", "tm (°c)", "tm1 (°c)", "melt temperature", "melting temperature"], // a Tm the instrument reported (no melt file needed)
   tm2: ["tm2", "tm2 (°c)"],
 };
@@ -561,12 +562,25 @@ export function parseResults(input, opts = {}) {
   const isHeader = l => FIELD_ALIASES.well.includes(normHeader(splitDelimited(l, delim)[0]?.cells[wellCol]));
   let end = lines.findIndex((l, i) => i > hi && (/^\s*\[.+\]/.test(l) || isHeader(l)));
   if (end < 0) end = lines.length;
-  const rows = splitDelimited(lines.slice(hi, end).join("\n"), delim), offset = hi;
+  let rows = splitDelimited(lines.slice(hi, end).join("\n"), delim), offset = hi;
+  // SDS 1.x "Ct" exports: one block per detector, each "Detector,Reporter,…" / values / "Well,SampleName,Ct" / rows.
+  // Every block is read, and the detector name becomes the target (the table itself has no target column).
+  const DET_RE = /^\s*detector\s*[,\t;]\s*reporter/i;
+  const blocks = hi >= 2 && DET_RE.test(lines[hi - 2]) ? lines.map((l, i) => (DET_RE.test(l) && i + 2 < lines.length && isHeader(lines[i + 2]) ? i : -1)).filter(i => i >= 0) : [];
+  if (blocks.length) {
+    rows = [{ ...rows[0], line: 1 }];
+    blocks.forEach((b, k) => {
+      const det = (splitDelimited(lines[b + 1], delim)[0]?.cells[0] ?? "").trim() || null, stop = k + 1 < blocks.length ? blocks[k + 1] : lines.length;
+      for (const r of splitDelimited(lines.slice(b + 3, stop).join("\n"), delim)) rows.push({ ...r, line: r.line + b + 3 - hi, det }); // keeps the file's own line numbers
+    });
+  }
   const header = rows[0];
   const headerMap = mapHeaders(header.cells), { columns, names, unrecognized } = headerMap;
+  if (blocks.length && !("target" in columns)) names.target = "Detector (block heading)";
   const headers = header.cells.map(s => s.trim()).filter(Boolean);
   let format = "generic-ct-csv";
-  if (/^\s*\[results\]/im.test(preamble) || "Block Type" in metadata || (/^well position$/i.test(names.well || "") && "omit" in columns)) format = "thermo-quantstudio";
+  if (blocks.length) format = "abi-sds";
+  else if (/^\s*\[results\]/im.test(preamble) || "Block Type" in metadata || (/^well position$/i.test(names.well || "") && "omit" in columns)) format = "thermo-quantstudio";
   else if (/^SDS\s|SDS v\d|\.sds\b/im.test(preamble) || /^detector( name)?$/i.test(names.target || "")) format = "abi-sds";
   else if ("fluor" in columns && /^content$/i.test(names.role || "")) format = "biorad-cfx-cq";
   const width = header.cells.length, need = Math.max(columns.well, columns.ct) + 1;
@@ -593,9 +607,9 @@ export function parseResults(input, opts = {}) {
     const roleRaw = get("role");
     const sw = wellKey(get("well")) ? null : splitWell(get("well"));
     out.push({ id: line, line, well: get("well") ?? "", key: wellKey(get("well")) || sw?.key || null, wellPrefix: sw?.prefix ?? null,
-      sample: get("sample"), target: get("target"),
+      sample: get("sample"), target: get("target") ?? r.det ?? null,
       ct: get("ct"), roleRaw, role: normalizeRole(roleRaw), quantity: get("quantity"), group: get("group"),
-      bio_unit: get("bio_unit"), pair: get("pair"), factor2: get("factor2"), fluor: get("fluor"), omit: /^(true|yes|1)$/i.test(get("omit") || ""),
+      bio_unit: get("bio_unit"), pair: get("pair"), factor2: get("factor2"), fluor: get("fluor"), omit: /^(true|yes|1)$/i.test(get("omit") || "") || /^(false|no|0)$/i.test(get("include") || ""),
       tm: get("tm"), tm2: get("tm2") });
   }
   const prefixed = out.filter(r => r.wellPrefix), prefixes = [...new Set(prefixed.map(r => r.wellPrefix))];
@@ -626,9 +640,10 @@ export function parseResults(input, opts = {}) {
   }
   for (const [f, d] of Object.entries(headerMap.duplicates || {}))
     warnings.push(`More than one column could be the ${FIELD_LABEL[f] || f} column: ${d.cols.join(" and ")}. I used column ${d.used + 1}; check that it's the right one, and remove or rename the other column if not.`);
-  if (!("target" in columns)) warnings.push("No target column was found. Assign targets in the plate map.");
+  if (blocks.length) warnings.push(`The file has ${blocks.length} detector block${blocks.length === 1 ? "" : "s"}; each was read, and the detector name was used as the target.`);
+  else if (!("target" in columns)) warnings.push("No target column was found. Assign targets in the plate map.");
   if (!("sample" in columns)) warnings.push("No sample column was found. Assign samples in the plate map.");
-  if (out.some(r => r.omit)) warnings.push(`${out.filter(r => r.omit).length} well(s) are marked Omit in the instrument software. PlateCheck keeps and checks them, and flags them for review.`);
+  if (out.some(r => r.omit)) warnings.push(`${out.filter(r => r.omit).length} well(s) are excluded in the instrument software (Omit, or Include = FALSE). PlateCheck keeps and checks them, and flags them for review.`);
   const unmapped = [...new Set(out.filter(r => r.roleRaw && !r.role).map(r => r.roleRaw))];
   if (unmapped.length) warnings.push(`Role values not mapped automatically: ${unmapped.join(", ")}. Assign these roles in the plate map.`);
   if (malformed.length) warnings.push(`${malformed.length} row(s) could not be parsed and will be excluded from checks and reported.`);
@@ -642,8 +657,39 @@ const Y_ALIASES = {
   amp: ["delta rn", "δrn", "deltarn", "rfu", "fluorescence", "rn", "value"],
   melt: ["derivative", "-df/dt", "-d(rfu)/dt", "-rn'", "derivative reporter", "fluorescence", "rfu", "value"],
 };
-export function parseCurves(input, kind) {
+// SDS 1.x melt export (7300/7500 "Dissociation" data): per detector, "Detector = X,Reporter = Y", then rows of
+// "well, reading 1, …, reading N" under "Well, Temperatures …", "Well, Raw Data …" and "Well, Derivative Data …".
+// Wells are numbered; positions come from opts.plateSize (taken from the results file in analyze()), else 96 wells
+// unless a number exceeds 96, and the result says the layout was assumed.
+const SDS_MELT_RE = /^\s*well\s*,\s*temperatures\s*\(reading/im;
+function parseSdsMelt(text, opts) {
+  const lines = text.split(/\r\n|\r|\n/), temps = {}, vals = { raw: {}, der: {} };
+  let det = "", sec = null;
+  for (const l of lines) {
+    const d = /^\s*detector\s*=\s*([^,]*)/i.exec(l); if (d) { det = d[1].trim(); sec = null; continue; }
+    if (/^\s*well\s*,\s*temperatures/i.test(l)) { sec = "t"; continue; }
+    if (/^\s*well\s*,\s*raw data/i.test(l)) { sec = "raw"; continue; }
+    if (/^\s*well\s*,\s*derivative data/i.test(l)) { sec = "der"; continue; }
+    const c = l.split(","); if (!sec || !/^\s*\d+\s*$/.test(c[0])) continue;
+    const k = `${Number(c[0])}|${det}`, v = c.slice(1).map(s => toNum(s)).filter(x => x !== null);
+    if (sec === "t") temps[k] = v; else vals[sec][k] = v;
+  }
+  const use = Object.keys(vals.der).length ? "der" : "raw", nums = Object.keys(temps).map(k => Number(k.split("|")[0]));
+  if (!nums.length) throw new ParseError("The SDS melt file has no temperature rows.");
+  const size = opts.plateSize || (Math.max(...nums) > 96 ? 384 : 96), cols = size === 384 ? 24 : 12, series = {};
+  for (const [k, t] of Object.entries(temps)) {
+    const y = vals[use][k]; if (!y) continue;
+    const [n, dt] = k.split("|"), i = Number(n) - 1, pos = String.fromCharCode(65 + Math.floor(i / cols)) + ((i % cols) + 1);
+    series[`${pos}|${dt}`] = t.slice(0, y.length).map((x, j) => [x, y[j]]).sort((a, b) => a[0] - b[0]);
+  }
+  const wells = [...new Set(Object.keys(series).map(k => k.split("|")[0]))].sort((a, b) => wellOrder(a) - wellOrder(b));
+  return { kind: "melt", layout: "sds-rows", xName: "Temperature", yName: use === "der" ? "Derivative Data" : "Raw Data", series, wells, malformed: 0,
+    points: Object.values(series).reduce((a, s) => a + s.length, 0), guessedValueType: use === "der" ? "derivative" : "fluorescence",
+    plateAssumed: !opts.plateSize, plateSize: size, parserVersion: PARSER_VERSION };
+}
+export function parseCurves(input, kind, opts = {}) {
   const text = String(input ?? "").replace(/^﻿/, "");
+  if (kind === "melt" && SDS_MELT_RE.test(text)) return parseSdsMelt(text, opts);
   // The header is the first row with a cycle or temperature column. QuantStudio puts a block of run details above it.
   // If the guessed delimiter doesn't produce such a header (a comma in a note line, say), try the others.
   const headerAt = rows => rows.slice(0, 500).findIndex(r => r.cells.some(c => X_ALIASES[kind].includes(normHeader(c.trim()))));
@@ -1243,7 +1289,9 @@ export function analyze(exp) {
   if (!exp.melt) res.notAssessed.push(tmRows.length ? "Melt curves: no melt curve file, so only the Tm values in the results file were checked (no peak heights, no NTC peaks)." : "Melt curves: no melt data was provided.");
   else if (!v.meltChecks) res.notAssessed.push("Melt curves: data was provided, but melt-curve checks are not enabled for this assay (More, then Method details and thresholdses). PlateCheck does not assume melt analysis applies.");
   else {
-    const mp = parseCurves(exp.melt.text, "melt"), isDer = exp.melt.valueType !== "fluorescence", ms = {};
+    // Numbered wells in a melt file (SDS) take their positions from the results file's plate size.
+    const plate = parsed.plateSize || (rows.some(r => r.key && (r.key.charCodeAt(0) > 72 || Number(r.key.slice(1)) > 12)) ? 384 : 96);
+    const mp = parseCurves(exp.melt.text, "melt", { plateSize: plate }), isDer = exp.melt.valueType !== "fluorescence", ms = {};
     for (const [k, pts] of Object.entries(mp.series)) ms[k] = meltStats(pts, isDer);
     res.melt = { stats: ms, valueType: isDer ? "derivative" : "fluorescence" };
     res.checksRun.push(`Melt curves (${isDer ? "derivative values" : "derivative computed from fluorescence"}): melt peak present, Tm within ±${v.meltTmTolerance} °C of the target median, secondary peaks ≥ ${v.meltSecondaryRatio} × main peak, NTC peaks`);

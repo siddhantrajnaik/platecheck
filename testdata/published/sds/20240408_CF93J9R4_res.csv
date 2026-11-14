@@ -1,0 +1,87 @@
+Document Name: 20240408_CF93J9R4 
+Plate Type: Absolute Quantification
+User: user-qpcr
+
+Document Information
+
+Operator: schwi
+Run Date: Monday, April 08, 2024 16:49:22
+Last Modified: Monday, April 08, 2024 18:23:44
+Instrument Type: Applied Biosystems 7500 Fast Real-Time PCR System
+
+Comments:
+SDS v1.3
+
+Well,Sample Name,Detector,Task,Ct,StdDev Ct,Qty,Mean Qty,StdDev Qty,Filtered,Tm
+A1,0,Hsap_Chr1q,Unknown,32.09,1.525,,,,,71.70
+A2,0,Hsap_Chr1q,Unknown,32.81,1.525,,,,,73.40
+A3,0,Hsap_Chr1q,Unknown,35.02,1.525,,,,,72.10
+A4,0,Hsap_Chr4p,Unknown,44.93,,,,,,65.40
+A5,0,Hsap_Chr4p,Unknown,Undetermined,,,,,,65.40
+A6,0,Hsap_Chr4p,Unknown,Undetermined,,,,,,65.40
+A7,0,Hsap_Chr12p,Unknown,44.92,,,,,,73.40
+A8,0,Hsap_Chr12p,Unknown,Undetermined,,,,,,65.40
+A9,0,Hsap_Chr12p,Unknown,Undetermined,,,,,,65.40
+B1,E-9,Hsap_Chr1q,Unknown,27.02,0.296,,,,,73.70
+B2,E-9,Hsap_Chr1q,Unknown,27.24,0.296,,,,,73.70
+B3,E-9,Hsap_Chr1q,Unknown,26.65,0.296,,,,,74.10
+B4,E-9,Hsap_Chr4p,Unknown,26.95,0.101,,,,,78.40
+B5,E-9,Hsap_Chr4p,Unknown,26.92,0.101,,,,,78.80
+B6,E-9,Hsap_Chr4p,Unknown,26.76,0.101,,,,,78.80
+B7,E-9,Hsap_Chr12p,Unknown,27.88,0.204,,,,,76.80
+B8,E-9,Hsap_Chr12p,Unknown,28.25,0.204,,,,,76.80
+B9,E-9,Hsap_Chr12p,Unknown,28.22,0.204,,,,,76.80
+C1,E-10,Hsap_Chr1q,Unknown,30.30,0.072,,,,,73.70
+C2,E-10,Hsap_Chr1q,Unknown,30.22,0.072,,,,,73.70
+C3,E-10,Hsap_Chr1q,Unknown,30.36,0.072,,,,,74.10
+C4,E-10,Hsap_Chr4p,Unknown,30.74,0.321,,,,,78.80
+C5,E-10,Hsap_Chr4p,Unknown,30.36,0.321,,,,,78.80
+C6,E-10,Hsap_Chr4p,Unknown,30.11,0.321,,,,,79.10
+C7,E-10,Hsap_Chr12p,Unknown,31.62,0.557,,,,,77.10
+C8,E-10,Hsap_Chr12p,Unknown,31.37,0.557,,,,,77.10
+C9,E-10,Hsap_Chr12p,Unknown,32.43,0.557,,,,,77.10
+D1,E-11,Hsap_Chr1q,Unknown,33.50,0.651,,,,,74.10
+D2,E-11,Hsap_Chr1q,Unknown,34.65,0.651,,,,,74.10
+D3,E-11,Hsap_Chr1q,Unknown,33.54,0.651,,,,,74.10
+D4,E-11,Hsap_Chr4p,Unknown,34.01,0.555,,,,,78.80
+D5,E-11,Hsap_Chr4p,Unknown,34.52,0.555,,,,,79.10
+D6,E-11,Hsap_Chr4p,Unknown,33.42,0.555,,,,,79.10
+D7,E-11,Hsap_Chr12p,Unknown,36.21,0.466,,,,,78.40
+D8,E-11,Hsap_Chr12p,Unknown,36.09,0.466,,,,,77.10
+D9,E-11,Hsap_Chr12p,Unknown,35.35,0.466,,,,,77.10
+E1,E-12,Hsap_Chr1q,Unknown,34.38,0.552,,,,,73.40
+E2,E-12,Hsap_Chr1q,Unknown,35.05,0.552,,,,,72.70
+E3,E-12,Hsap_Chr1q,Unknown,35.48,0.552,,,,,72.70
+E4,E-12,Hsap_Chr4p,Unknown,36.70,0.944,,,,,79.10
+E5,E-12,Hsap_Chr4p,Unknown,36.61,0.944,,,,,78.80
+E6,E-12,Hsap_Chr4p,Unknown,35.02,0.944,,,,,79.10
+E7,E-12,Hsap_Chr12p,Unknown,36.94,0.826,,,,,77.10
+E8,E-12,Hsap_Chr12p,Unknown,37.09,0.826,,,,,79.10
+E9,E-12,Hsap_Chr12p,Unknown,38.44,0.826,,,,,76.80
+F1,E-13,Hsap_Chr1q,Unknown,35.90,0.134,,,,,73.10
+F2,E-13,Hsap_Chr1q,Unknown,35.91,0.134,,,,,73.70
+F3,E-13,Hsap_Chr1q,Unknown,35.67,0.134,,,,,72.70
+F4,E-13,Hsap_Chr4p,Unknown,Undetermined,,,,,,65.40
+F5,E-13,Hsap_Chr4p,Unknown,44.17,,,,,,83.90
+F6,E-13,Hsap_Chr4p,Unknown,Undetermined,,,,,,65.40
+F7,E-13,Hsap_Chr12p,Unknown,Undetermined,,,,,,78.40
+F8,E-13,Hsap_Chr12p,Unknown,36.31,,,,,,77.10
+F9,E-13,Hsap_Chr12p,Unknown,Undetermined,,,,,,66.10
+G1,E-14,Hsap_Chr1q,Unknown,33.55,1.095,,,,,71.70
+G2,E-14,Hsap_Chr1q,Unknown,35.63,1.095,,,,,72.70
+G3,E-14,Hsap_Chr1q,Unknown,34.01,1.095,,,,,72.10
+G4,E-14,Hsap_Chr4p,Unknown,39.28,,,,,,79.10
+G5,E-14,Hsap_Chr4p,Unknown,Undetermined,,,,,,65.40
+G6,E-14,Hsap_Chr4p,Unknown,Undetermined,,,,,,65.40
+G7,E-14,Hsap_Chr12p,Unknown,36.91,,,,,,76.80
+G8,E-14,Hsap_Chr12p,Unknown,Undetermined,,,,,,72.70
+G9,E-14,Hsap_Chr12p,Unknown,Undetermined,,,,,,67.70
+H1,E-15,Hsap_Chr1q,Unknown,35.68,0.797,,,,,71.70
+H2,E-15,Hsap_Chr1q,Unknown,36.73,0.797,,,,,68.10
+H3,E-15,Hsap_Chr1q,Unknown,35.17,0.797,,,,,71.70
+H4,E-15,Hsap_Chr4p,Unknown,Undetermined,,,,,,65.40
+H5,E-15,Hsap_Chr4p,Unknown,Undetermined,,,,,,65.40
+H6,E-15,Hsap_Chr4p,Unknown,42.23,,,,,,83.20
+H7,E-15,Hsap_Chr12p,Unknown,Undetermined,,,,,,66.10
+H8,E-15,Hsap_Chr12p,Unknown,Undetermined,,,,,,69.10
+H9,E-15,Hsap_Chr12p,Unknown,Undetermined,,,,,,75.10

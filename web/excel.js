@@ -62,7 +62,16 @@ export function classifySheets(sheets) {
     // A sheet named exactly like an instrument's results sheet beats one that only contains the word ("Old results").
     const score = s => (EXACT[kind].test(s.sheet.trim()) ? 2 : PREFER[kind].test(s.sheet) ? 1 : 0);
     c.sort((a, b) => (score(b) - score(a)) || (rows(b) - rows(a)));
-    best[kind] = { ...c[0], alternatives: c.slice(1).map(s => s.sheet) };
+    // Newer QuantStudio workbooks have no Quantity column on "Results"; the standards' quantities are only on
+    // "Standard Curve Result", which repeats every well with the same Cq. Use that sheet then, so the curve can be fitted.
+    let why = null;
+    if (kind === "results" && c[0].parsed?.rows?.some(r => r.role === "standard") && !("quantity" in (c[0].parsed.columns || {}))) {
+      const same = s => { const m = new Map(s.parsed.rows.map(r => [`${r.key}|${r.target}`, r]));
+        return c[0].parsed.rows.every(r => { const o = m.get(`${r.key}|${r.target}`); return o && String(o.ct ?? "") === String(r.ct ?? "") && (o.sample ?? "") === (r.sample ?? ""); }); };
+      const alt = c.slice(1).find(s => "quantity" in (s.parsed?.columns || {}) && s.parsed.rows.some(r => r.role === "standard" && r.quantity) && same(s));
+      if (alt) { why = `“${c[0].sheet}” has no Quantity column for its standards; “${alt.sheet}” has every well with the same Cq plus the quantities, so I used it.`; c.splice(c.indexOf(alt), 1); c.unshift(alt); }
+    }
+    best[kind] = { ...c[0], alternatives: c.slice(1).map(s => s.sheet), why };
   }
   return { found, best };
 }
