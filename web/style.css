@@ -400,3 +400,10 @@ dialog form { margin-top: 16px; }
 .pmap-legend .sq.none { background: transparent; }
 .frow-disp.stale { color: var(--medium); font-weight: 500; }
 .stale-note { grid-column: 1 / -1; }
+/* MIQE 2.0 checklist (Report step) */
+.miqe td { vertical-align: top; }
+.miqe td:nth-child(2) { width: 32%; }
+.miqe textarea { width: 100%; min-width: 220px; font: inherit; font-size: .88rem; }
+.miqe small { display: block; margin-top: 2px; }
+details.miqe-sec { margin: 10px 0; }
+details.miqe-sec > summary { cursor: pointer; font-weight: 600; }

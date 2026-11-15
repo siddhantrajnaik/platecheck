@@ -926,6 +926,10 @@ export function normalizeExperiment(exp) {
   }
   exp.map = map;
   exp.context = isObj(exp.context) ? Object.fromEntries(Object.entries(exp.context).filter(([, v]) => typeof v === "string")) : {};
+  // MIQE 2.0 checklist answers (web/miqe.js): { "5.8": { provided: "yes" | "no" | "na", text } }, item IDs like 1.1 … 5.19.
+  exp.miqe = isObj(exp.miqe) ? Object.fromEntries(Object.entries(exp.miqe).filter(([id, a]) => /^[1-5]\.\d{1,2}$/.test(id) && isObj(a))
+    .map(([id, a]) => [id, { ...(["yes", "no", "na"].includes(a.provided) ? { provided: a.provided } : {}), ...(typeof a.text === "string" && a.text.trim() ? { text: a.text.slice(0, 4000) } : {}) }])
+    .filter(([, a]) => Object.keys(a).length)) : {};
   exp.controlNA = isObj(exp.controlNA) ? Object.fromEntries(Object.entries(exp.controlNA).filter(([, v]) => isObj(v) && asStr(v.reason))
     .map(([k, v]) => [k, { reason: asStr(v.reason), by: asStr(v.by) || "unknown", at: asStr(v.at) || now }])) : {};
   const reviews = {};

@@ -5,6 +5,8 @@ import * as S from "./store.js";
 import { demoFiles, DEMO_CONTEXT, DEMO_TITLE } from "./demo.js";
 import { plot } from "./charts.js";
 import * as Q from "./absquant.js"; // absolute quantity of unknowns from the standard curves
+import * as M from "./miqe.js"; // MIQE 2.0 checklist
+import { analyzeRun } from "./analysis.js";
 import { CREDIT } from "./credit.js";
 import { readWorkbook } from "./excel.js";
 import { evidenceNote, variabilityCard } from "./ui-variability.js"; // thresholds workstream
@@ -1010,8 +1012,30 @@ VIEWS.report = () => {
           box("Flags (CSV)", "One row per flag with the evidence and your decision.", "Download CSV", go("Findings", `${base}-flags.csv`, () => R.findingsCsv(st.exp, st.res), "text/csv")),
           box("Results (JSON)", "Everything above in one structured file, for scripts.", "Download JSON", go("Structured results", `${base}-results.json`, () => R.structuredJson(st.exp, st.res), "application/json")),
           box("Whole run (packet)", "The run with its original files and history. Open it here again later with “Open a run you saved earlier”.", "Download packet", go("Experiment packet", `${base}.platecheck.json`, () => R.packetJson(st.exp, st.res), "application/json"))))),
+    miqeCard(base, log),
     card(h("h2", null, "Preview"), frame)];
 };
+// MIQE 2.0 checklist (web/miqe.js): PlateCheck's suggestions from the run, your answers on top, saved with the run.
+function miqeCard(base, log) {
+  let a = null; try { if (st.exp.analysis?.on) a = analyzeRun(st.exp, st.res); } catch { /* analysis not ready: no analysis-based suggestions */ }
+  const rows = M.checklist(st.exp, st.res, a), sum = M.summary(rows);
+  const setItem = (id, patch, what) => change("miqe", `MIQE ${id}: ${what}`, () => { st.exp.miqe[id] = { ...(st.exp.miqe[id] || {}), ...patch }; }, { rerender: "provided" in patch });
+  const row = r => h("tr", null, h("td", { class: "mono" }, r.id), h("td", null, r.label),
+    h("td", null, h("select", { "aria-label": `Provided: ${r.label}`, onchange: ev => setItem(r.id, { provided: ev.target.value }, `provided ${ev.target.value || "unset"}`) },
+      [["", "—"], ...Object.entries(M.ANSWERS)].map(([v, l]) => h("option", { value: v, selected: r.provided === v }, l)))),
+    h("td", null, h("textarea", { rows: 2, "aria-label": `Description: ${r.label}`, placeholder: "Where it is in the paper, or why it's missing", onchange: ev => setItem(r.id, { text: ev.target.value }, "description edited") }, r.text),
+      r.suggested && !r.edited && h("small", { class: "muted" }, r.suggested.provided === "yes" ? "Filled in by PlateCheck from this run; check it." : "PlateCheck's starting point from this run; complete it.")));
+  return card(h("h2", null, "MIQE 2.0 checklist"),
+    h("p", { class: "lede" }, `The checklist journals and reviewers use for qPCR papers (Bustin et al., Clin Chem 2025, Table 1). PlateCheck fills in what it can see in this run, such as controls, efficiency, replicates, normalisation and statistics; the rest (samples, RNA, reverse transcription, reagents) is yours. Your answers are saved with the run.`),
+    h("p", null, `${sum.yes} Yes, ${sum.no} No, ${sum.na} not applicable, ${sum.open} still open, of ${sum.total} items (${sum.auto} answered from the run).`),
+    h("div", { class: "row" },
+      h("button", { class: "btn", type: "button", onclick: () => { const n = `${base}-MIQE-2.0-checklist.doc`; download(n, M.miqeDoc(st.exp, rows, R.esc), "application/msword"); log("MIQE checklist", n); } }, "Download checklist for Word"),
+      h("button", { class: "btn", type: "button", onclick: () => { const n = `${base}-MIQE-2.0-checklist.csv`; download(n, M.miqeCsv(rows), "text/csv"); log("MIQE checklist", n); } }, "Download checklist (CSV)")),
+    M.SECTIONS.map((s, i) => { const rs = rows.filter(r => r.section === s), done = rs.filter(r => r.provided).length;
+      return h("details", { class: "miqe-sec", open: i === 4 }, h("summary", null, `${i + 1}. ${s} (${done} of ${rs.length} answered)`),
+        h("div", { class: "tablewrap" }, h("table", { class: "tbl miqe" }, h("thead", null, h("tr", null, ["Item", "What to report", "Provided", "Description or reason"].map(x => h("th", null, x)))), h("tbody", null, rs.map(row))))); }),
+    h("p", { class: "fine" }, `Item labels are PlateCheck's short wording; the full items are in Table 1 of ${M.MIQE_SOURCE}`));
+}
 
 // ---------------------------------------------------------------- Compare runs (FR-7)
 VIEWS.compare = () => {
