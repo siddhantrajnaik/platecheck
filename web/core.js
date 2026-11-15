@@ -513,10 +513,11 @@ const FIELD_ALIASES = {
   include: ["include"], // LightCycler: FALSE = excluded on the instrument, reported like QuantStudio's Omit
   tm: ["tm", "tm1", "tm (°c)", "tm1 (°c)", "melt temperature", "melting temperature"], // a Tm the instrument reported (no melt file needed)
   tm2: ["tm2", "tm2 (°c)"],
+  chemistry: ["chemistry", "dye chemistry"], // detection chemistry (RDML dyeChemistry); LinRegPCR shifts probe Cq by one cycle
 };
 export const FIELD_LABEL = { well: "Well", sample: "Sample", target: "Target", ct: "Ct/Cq", role: "Role / task",
   quantity: "Quantity", group: "Group", bio_unit: "Biological unit", pair: "Pair", factor2: "Second factor", fluor: "Fluorophore", omit: "Omit flag", include: "Include flag",
-  tm: "Tm", tm2: "Tm2" };
+  tm: "Tm", tm2: "Tm2", chemistry: "Chemistry" };
 // Roche and some other exports name the Ct column after the dye ("Ct SYBR", "Cq FAM", "Cp SYBR Green") or write "CT Value".
 // Only a known dye (or "value") may follow, so summary columns such as "Ct Mean", "Ct SD" or "Ct Threshold" are never
 // taken for the Ct column.
@@ -626,7 +627,7 @@ export function parseResults(input, opts = {}) {
       sample: get("sample"), target: get("target") ?? r.det ?? null,
       ct: get("ct"), roleRaw, role: normalizeRole(roleRaw), quantity: get("quantity"), group: get("group"),
       bio_unit: get("bio_unit"), pair: get("pair"), factor2: get("factor2"), fluor: get("fluor"), omit: /^(true|yes|1)$/i.test(get("omit") || "") || /^(false|no|0)$/i.test(get("include") || ""),
-      tm: get("tm"), tm2: get("tm2") });
+      tm: get("tm"), tm2: get("tm2"), chemistry: get("chemistry") });
   }
   const prefixed = out.filter(r => r.wellPrefix), prefixes = [...new Set(prefixed.map(r => r.wellPrefix))];
   if (prefixes.length) warnings.push(`Well positions carry a prefix (${prefixes.map(p => `“${p}”`).join(", ")}), as in “${prefixed[0].well}”. I read the position from the end (${prefixed[0].key}).` +
@@ -882,6 +883,7 @@ export function cleanAnalysisSettings(a) {
   const names = v => (Array.isArray(v) ? [...new Set(v.filter(x => typeof x === "string" && x.trim()).map(x => x.slice(0, 200)))].slice(0, 100) : []);
   const shift = a.refMaxShift;
   return { on: a.on === true, refs: names(a.refs), control: asStr(a.control).slice(0, 200), efficiency: a.efficiency === true,
+    effSource: a.effSource === "linreg" ? "linreg" : "std", // efficiencies for the Pfaffl correction: standard curves, or LinRegPCR on the amplification curves (web/linreg.js)
     error: ["sem", "ci"].includes(a.error) ? a.error : "sd", correction: a.correction === "bonferroni" ? "bonferroni" : "bh", skipOmitted: a.skipOmitted !== false,
     excluded: names(a.excluded), scale: a.scale === "linear" ? "linear" : "log2", test: ANALYSIS_TESTS.includes(a.test) ? a.test : "welch",
     refMaxShift: typeof shift === "number" && Number.isFinite(shift) && shift > 0 && shift <= 10 ? shift : 0.5,
@@ -976,7 +978,7 @@ export function effectiveRows(exp, parsed) {
     if (bioSource === "default (sample name)" && group && ASSAY_WORD_RE.test(sample.trim())) { bio_unit = `${sample.trim()} · ${group}`; bioSource = "default (sample name + group)"; }
     return { id: r.id, line: r.line, well: r.well, key: r.key, ct: r.ct, dc: r.dc, fluor: r.fluor,
       sample, sampleSource, target, targetSource, group, quantity, pair, factor2, role, roleSource, roleRaw: r.roleRaw,
-      fileRoleUnmapped: !!(r.roleRaw && !r.role), bio_unit, bioSource, omit: r.omit, tm: r.tm ?? null, tm2: r.tm2 ?? null,
+      fileRoleUnmapped: !!(r.roleRaw && !r.role), bio_unit, bioSource, omit: r.omit, tm: r.tm ?? null, tm2: r.tm2 ?? null, chemistry: r.chemistry ?? null,
       file: { sample: r.sample, target: r.target, group: r.group, role: r.role ?? r.roleRaw, bio_unit: r.bio_unit, quantity: r.quantity, pair: r.pair, factor2: r.factor2 } };
   });
 }

@@ -22,4 +22,5 @@ Files are copied unchanged. They are used only to compare PlateCheck's numbers w
 | `refgenes/ref.json`, `ref.R` | NormqPCR 1.x `stabMeasureM`, `selectHKs` (geNorm, NormFinder) and `stabMeasureRho` on those data (R 4.3.2) | Perkins et al. 2012, BMC Genomics 13:296, doi:10.1186/1471-2164-13-296 |
 | `rdml/py_*.rdml` | example RDML files from rdmlpython (RDML consortium, MIT licence), `experiments/technical` and `experiments/untergasser`, unchanged | https://github.com/RDML-consortium/rdmlpython |
 | `rdml/lxml_reading.json`, `lxml_reading.py` | well, sample, target, Cq and point counts per reaction, read with lxml (not PlateCheck) from these files and from the rdml-tools examples | |
+| `rdml/linregpcr_reference.json` | rdmlpython 1.7.2 `Run.linRegPCR` (defaults) on these files and the rdml-tools examples: per reaction efficiency, R², baseline, mean efficiency, Cq, N0, window points and flags (`platecheck-qa/papers/linreg/ref.py`) | |
 | (fetched) `public/rdml-tools/*.rdml` | example RDML files from RDML-Tools (GPL-3.0), downloaded by `testdata/fetch-public.mjs`, not stored here | https://github.com/RDML-consortium/rdml-tools |

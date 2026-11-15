@@ -23,6 +23,7 @@ Comma, tab or semicolon separated text, or a sheet of an Excel workbook. Column 
 | Quantity | `Quantity`, `Starting Quantity (SQ)`, `SQ`, `Qty` | no |
 | Group | `Group`, `Condition`, `Biological Group`, `Biological Set Name` | no |
 | Biological unit | `bio_unit`, `Biological Unit`, `Biological Replicate`, `Bio Rep` | no |
+| Chemistry | `Chemistry`, `Dye Chemistry` (for example `hydrolysis probe`, `TaqMan`, `SYBR`); only used by the per-well efficiency (LinRegPCR) | no |
 
 The header row is found anywhere in the first 500 lines (the first row with both a well and a Ct/Cq column). Lines before it are kept as file metadata (`* key = value`, `key,value` and `key: value` lines). The table ends at the next `[Section]` line or a repeated header; blank lines inside it are skipped. A trailing block of rows without well positions (for example Slope / R² or “Analysis Type”) is reported as a footer, not data.
 
@@ -53,7 +54,7 @@ RDML (Real-time PCR Data Markup Language, https://rdml.org; Lefever et al. 2009,
 | `excl` | excluded on the instrument (like QuantStudio's Omit) |
 | target type `ref` | named in the upload note, to choose as references in the Analysis step |
 
-A file with several runs uses the first and says so; load another with Replace. Runs with curves but no Cq values (raw-data-only RDML) can be read but not checked; the note says to export Cq values first (instrument software, or RDML-Tools' LinRegPCR).
+A file with several runs uses the first and says so; load another with Replace. Runs with curves but no Cq values (raw-data-only RDML) get their Cq from LinRegPCR on import (see docs/analysis.md, “Per-well efficiency”), and the upload note says so. Each target's `dyeChemistry` is kept as the Chemistry column.
 
 **Export.** Report step, Other formats, "Download RDML": RDML 1.3 with the plate format, samples (type, standards' quantity, group and biological unit as annotations), targets (type `ref` for the analysis references; standard-curve efficiency where there is one), and per reaction the Cq, the exclusion flag and the raw amplification and melt points. What RDML can't hold is listed after the download: wells without a plate position or target, reactions without a sample name (the well name is used), Cq values that aren't numbers, a second result for the same target in one well, and melt curves that are derivative values (RDML holds raw melt fluorescence).
 

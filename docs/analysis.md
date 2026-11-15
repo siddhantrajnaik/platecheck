@@ -36,6 +36,8 @@ With one reference gene and group means this gives exactly Pfaffl's ratio
 
 and with several references it is the qBase normalised relative quantity on the log2 scale (Hellemans et al. 2007). With `E = 2` everywhere, `w = 1` and it reduces to plain ΔΔCt. A target without a standard curve gets 100% and a note; an efficiency outside 90–110% gets a note too. If several plates in a study have a curve for the same target, their efficiencies are averaged.
 
+**Efficiencies from the amplification curves.** With “Efficiencies from: Amplification curves, per-well LinRegPCR”, `E_t` is instead the target's mean LinRegPCR efficiency (see “Per-well efficiency” below): no dilution series needed, but the curves must be raw fluorescence. A target without a usable LinRegPCR efficiency gets 100% and a note; one outside 80–120% is not used (100% and a note), and one outside 80–110% is used with a note (per-well efficiencies of real assays often come out at 85–95%, below standard-curve estimates). In a study, the per-plate means are pooled, weighted by the number of wells.
+
 ## Statistics
 
 - Tests run on ΔCt (log scale), with biological units as n. ΔΔCt differs from ΔCt by a constant, so the tests are the same either way. All tests are two-sided.
@@ -347,6 +349,23 @@ python -m venv /tmp/platecheck-statsref
 - The result depends on the panel's composition: the same set can look enriched on one panel and not on another.
 - GO sets depend on what MyGene.info returns for your species; for some species (pig, for example) there are few GO terms.
 
+## Per-well efficiency (LinRegPCR)
+
+When the run has amplification curves, the Review page shows each well's PCR efficiency worked out from its own curve, following LinRegPCR (Ruijter et al. 2009; Untergasser et al. 2021). Code: `web/linreg.js`, a step-for-step port of `Run.linRegPCR` in rdmlpython 1.7.2 (MIT licence), with its defaults.
+
+1. **Amplification check.** A well whose log fluorescence doesn't rise, or rises less than sevenfold above its minimum, is "no amplification".
+2. **Baseline per well.** A constant baseline is set so that the log-linear phase is straight: start too high (just below the end of the exponential phase), lower it until the lower half of the phase is less steep than the upper half, then fine-tune until both halves have the same slope. Wells where that fails get a baseline error; wells whose Cq moves by more than a cycle when the baseline is moved ±5% are "instable baseline".
+3. **Window of linearity per target.** A fluorescence window spanning about four cycles of amplification is slid down the log-linear phase, and the position where the efficiencies of the target's wells vary least is kept.
+4. **Efficiency per well:** `E = 10^slope` of log10 fluorescence against cycle inside the window, with its R² and the number of points.
+5. **Mean efficiency per target:** the mean over wells that amplified, have a plateau, aren't negative controls or excluded, and aren't outliers (a skewness test, then Grubbs' test, one value at a time).
+6. **Cq and N0.** One common threshold (the geometric mean of the targets' thresholds); Cq is where each well's line, using the target's mean efficiency, crosses it (one cycle earlier for hydrolysis probes, as rdmlpython does; the chemistry comes from RDML `dyeChemistry` or a `Chemistry` column). N0 = threshold / E^Cq, in fluorescence units.
+
+Every well is listed with its efficiency, R², Cq from LinRegPCR next to the instrument's, N0, and why it was left out of the mean, if it was; CSV download. The per-target means can feed the Pfaffl correction (above). RDML runs with raw curves but no Cq get their Cq from this on import.
+
+**Checked against rdmlpython.** On all 14 runs of the RDML example files with curves (1,976 reactions; `platecheck-qa/papers/linreg`), every efficiency, R², baseline, Cq and N0 agrees with rdmlpython's to 1e-12 or better, and every flag (amplification, baseline error, plateau, noisy, outlier, window points) and note is identical. `tests/linreg.test.mjs` repeats this for the committed and downloaded files, and checks synthetic curves of known efficiency.
+
+**Limits.** LinRegPCR needs raw fluorescence. Baseline-subtracted data (ΔRn, negative values) are shifted and warned about, and the efficiencies are then unreliable. With fewer than 10 cycles nothing is computed. RDML 1.4 files read fine in PlateCheck; rdmlpython 1.7.2 itself reads up to RDML 1.3 (the comparison relabelled the files' version, which changes nothing LinRegPCR uses).
+
 ## In the report
 
 When the analysis is on, the HTML report gets an Analysis section: the method in words, the reference genes, the control group, the test used, n per group, the 95% confidence intervals, the test's p with both corrections, the Tukey or Games–Howell pairs, the paired fold change, the two-way ANOVA or Kruskal–Wallis results when those were chosen, the gene set enrichment when gene sets were chosen, and the notes. A study has its own HTML report (see "Several plates").
@@ -368,6 +387,8 @@ When the analysis is on, the HTML report gets an Analysis section: the method in
 - Perkins JR, Dawes JM, McMahon SB, Bennett DLH, Orengo C, Kohl M (2012). ReadqPCR and NormqPCR: R packages for the reading, quality checking and normalisation of RT-qPCR quantification cycle (Cq) data. *BMC Genomics* 13:296. doi:10.1186/1471-2164-13-296
 - Massart DL, Vandeginste BGM, Buydens LMC, de Jong S, Lewi PJ, Smeyers-Verbeke J (1997). *Handbook of Chemometrics and Qualimetrics, Part A*. Elsevier, Amsterdam; inverse prediction from a calibration line, p. 200 (the formula R's chemCal::inverse.predict implements).
 - Livak KJ, Schmittgen TD (2001). Analysis of relative gene expression data using real-time quantitative PCR and the 2^−ΔΔCT method. *Methods* 25(4):402–408. doi:10.1006/meth.2001.1262
+- Ruijter JM, Ramakers C, Hoogaars WMH, Karlen Y, Bakker O, van den Hoff MJB, Moorman AFM (2009). Amplification efficiency: linking baseline and bias in the analysis of quantitative PCR data. *Nucleic Acids Research* 37(6):e45. doi:10.1093/nar/gkp045
+- Untergasser A, Ruijter JM, Benes V, van den Hoff MJB (2021). Web-based LinRegPCR: application for the visualization and analysis of (RT)-qPCR amplification and melting data. *BMC Bioinformatics* 22:398. doi:10.1186/s12859-021-04306-1
 - Pfaffl MW (2001). A new mathematical model for relative quantification in real-time RT-PCR. *Nucleic Acids Research* 29(9):e45. doi:10.1093/nar/29.9.e45
 - Vandesompele J, De Preter K, Pattyn F, Poppe B, Van Roy N, De Paepe A, Speleman F (2002). Accurate normalization of real-time quantitative RT-PCR data by geometric averaging of multiple internal control genes. *Genome Biology* 3(7):research0034. doi:10.1186/gb-2002-3-7-research0034
 - Hellemans J, Mortier G, De Paepe A, Speleman F, Vandesompele J (2007). qBase relative quantification framework and software for management and automated analysis of real-time quantitative PCR data. *Genome Biology* 8(2):R19. doi:10.1186/gb-2007-8-2-r19

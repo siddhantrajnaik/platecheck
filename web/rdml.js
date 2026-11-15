@@ -4,6 +4,7 @@
 // upload path, provenance and checks are the same. Export writes RDML 1.3 (validated with rdmlpython's schema check).
 // Unzip / zip: the zip code in the bundled SheetJS library (works in every browser PlateCheck supports, and in Node).
 import { detectFileKind, parseCurves, ctNum, APP_VERSION, BUILD } from "./core.js";
+import { linRegPCR } from "./linreg.js"; // Cq for runs that carry raw curves only
 // Plain CSV for the texts handed to PlateCheck's own parser. Not core.toCsv: that one guards downloads against
 // spreadsheet formulas and would change a sample called "-RT" into "'-RT".
 const plainCsv = rows => rows.map(r => r.map(c => { const v = String(c ?? ""); return /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; }).join(",")).join("\n") + "\n";
@@ -56,25 +57,36 @@ export function rdmlRuns(xml) {
     const q = kid(s, "quantity");
     samples[s.attrs.id] = { type: txt(s, "type") || "unkn", quantity: q ? txt(q, "value") : "", unit: q ? txt(q, "unit") : "", group };
   }
-  const targets = Object.fromEntries(kids(doc, "target").map(t => [t.attrs.id, { type: txt(t, "type") || "toi", eff: txt(t, "amplificationEfficiency") }]));
+  const dyes = Object.fromEntries(kids(doc, "dye").map(d => [d.attrs.id, txt(d, "dyeChemistry")]));
+  const targets = Object.fromEntries(kids(doc, "target").map(t => [t.attrs.id, { type: txt(t, "type") || "toi", eff: txt(t, "amplificationEfficiency"), chemistry: dyes[kid(t, "dyeId")?.attrs.id] || "" }]));
   const runs = [];
   for (const ex of kids(doc, "experiment")) for (const run of kids(ex, "run")) {
     const f = kid(run, "pcrFormat"), fmt = { rows: txt(f, "rows"), columns: txt(f, "columns"), rowLabel: txt(f, "rowLabel") || "ABC", columnLabel: txt(f, "columnLabel") || "123" };
-    const res = [["Well", "Sample", "Target", "Task", "Quantity", "Cq", "Group", "Omit"]], amp = [["Well", "Target", "Cycle", "Fluorescence"]], melt = [["Well", "Target", "Temperature", "Fluorescence"]];
+    const res = [["Well", "Sample", "Target", "Task", "Quantity", "Cq", "Group", "Omit", "Chemistry"]], amp = [["Well", "Target", "Cycle", "Fluorescence"]], melt = [["Well", "Target", "Temperature", "Fluorescence"]];
     let withCq = 0, n = 0, opt = 0, a = 0, mm = 0;
+    const curves = []; // for LinRegPCR when the run has curves but no Cq
     for (const re of kids(run, "react")) {
       const well = label(fmt, +re.attrs.id), sid = kid(re, "sample")?.attrs.id ?? "", s = samples[sid] || { type: "unkn", quantity: "", group: "" };
       if (s.type === "opt") { opt++; continue; }
       for (const d of kids(re, "data")) {
         const tar = kid(d, "tar")?.attrs.id ?? "", cqRaw = txt(d, "cq"), cq = cqRaw === "" || +cqRaw < 0 ? "Undetermined" : cqRaw, excl = txt(d, "excl");
         n++; if (cqRaw !== "" && +cqRaw >= 0) withCq++;
-        res.push([well, sid, tar, TYPE[s.type] || "Unknown", s.type === "std" ? s.quantity : "", cq, s.group, excl ? "TRUE" : ""]);
-        for (const p of kids(d, "adp")) { amp.push([well, tar, txt(p, "cyc"), txt(p, "fluor")]); a++; }
+        res.push([well, sid, tar, TYPE[s.type] || "Unknown", s.type === "std" ? s.quantity : "", cq, s.group, excl ? "TRUE" : "", targets[tar]?.chemistry || ""]);
+        const fluor = [];
+        for (const p of kids(d, "adp")) { amp.push([well, tar, txt(p, "cyc"), txt(p, "fluor")]); a++; const i = Math.ceil(+txt(p, "cyc")) - 1; if (i >= 0 && i < 1000) fluor[i] = +txt(p, "fluor"); }
+        curves.push({ row: res.length - 1, key: well, target: tar, type: s.type, excluded: !!excl, chemistry: targets[tar]?.chemistry, fluor: Array.from(fluor, x => x ?? NaN) });
         for (const p of kids(d, "mdp")) { melt.push([well, tar, txt(p, "tmp"), txt(p, "fluor")]); mm++; }
       }
     }
     const w = [];
-    if (!withCq && n) w.push(`This run has ${a ? "amplification curves but " : ""}no Cq values, and PlateCheck's checks start from Cq values. Export the run with Cq values from your instrument software or from RDML-Tools (LinRegPCR), then load that file.`);
+    let lr = null;
+    if (!withCq && a) { // raw curves only: work out Cq with LinRegPCR, as RDML-Tools would
+      try { lr = linRegPCR(curves.filter(c => c.fluor.some(Number.isFinite))); } catch { lr = null; }
+      if (lr) { const by = new Map(lr.rows.map(x => [`${x.key}|${x.target}`, x]));
+        for (const c of curves) { const x = by.get(`${c.key}|${c.target}`); if (x?.cq != null) { res[c.row][5] = x.cq.toFixed(3); withCq++; } } }
+    }
+    if (lr) w.push(`This run had amplification curves but no Cq values, so PlateCheck worked out Cq from the raw curves with LinRegPCR (per-well baseline, one common threshold of ${+lr.threshold.toPrecision(4)}, each target's mean efficiency; Ruijter et al. 2009). ${withCq} of ${n} reactions got a Cq; the rest did not amplify. The per-well efficiencies are on the Review step.`);
+    else if (!withCq && n) w.push(`This run has ${a ? "amplification curves but " : ""}no Cq values, and PlateCheck's checks start from Cq values. Export the run with Cq values from your instrument software or from RDML-Tools (LinRegPCR), then load that file.`);
     else if (withCq < n) w.push(`${n - withCq} of ${n} reactions have no Cq in the RDML file (missing or −1); they are read as Undetermined.`);
     if (opt) w.push(`${opt} optical calibrator reaction(s) (sample type "opt") were left out.`);
     const refs = [...new Set(res.slice(1).map(r => r[2]))].filter(t => targets[t]?.type === "ref");

@@ -6,6 +6,7 @@ import { demoFiles, DEMO_CONTEXT, DEMO_TITLE } from "./demo.js";
 import { plot } from "./charts.js";
 import * as Q from "./absquant.js"; // absolute quantity of unknowns from the standard curves
 import * as M from "./miqe.js"; // MIQE 2.0 checklist
+import * as LR from "./linreg.js"; // per-well efficiency (LinRegPCR)
 import { analyzeRun } from "./analysis.js";
 import { CREDIT } from "./credit.js";
 import { readWorkbook } from "./excel.js";
@@ -976,6 +977,7 @@ VIEWS.findings = () => {
         + `, R² ${fmt(c.r2, 4)}, slope ${fmt(c.slope, 3)}, ${c.levels} levels, ${c.points.length} wells.`));
     })),
     absQuantCard(res),
+    linregCard(res),
     card(h("h2", null, "Was this useful?"),
       h("p", { class: "lede" }, "Your answer stays with this experiment. Nothing gets sent to me; if you want to tell me something, email me."),
       h("div", { class: "seg", role: "group", "aria-label": "Usefulness" }, ["Yes", "Partly", "No"].map(v => h("button", { type: "button", class: fb === v ? "on" : "", "aria-pressed": String(fb === v),
@@ -998,6 +1000,38 @@ function absQuantCard(res) {
         h("td", { class: "num" }, fmt(u.meanCt, 2)), h("td", { class: "num" }, Q.fmtQ(u.q)), h("td", { class: "num" }, pi(u)), h("td", { class: "num" }, Q.fmtQ(u.qWellMean)), h("td", null, u.note)))))),
     h("p", { class: "fine" }, "Method: quantity = 10^((Ct − intercept) / slope); interval from the inverse-regression formula (Massart et al. 1997), checked against R's chemCal::inverse.predict and against QuantStudio's own quantities."),
     h("div", { class: "row" }, h("button", { class: "btn", type: "button", onclick: () => download(`${st.exp.id}-quantities.csv`, Q.quantCsv(q, C.toCsv), "text/csv") }, "Download quantities (CSV)")));
+}
+
+// Per-well PCR efficiency from the amplification curves: LinRegPCR (web/linreg.js, a port of rdmlpython's). Shown when
+// the run has amplification curves. Each target's mean efficiency can feed the Pfaffl correction on the Analysis step.
+function linregCard(res) {
+  const L = LR.forRun(res);
+  if (!L) return null;
+  const pct = E => (E == null ? "—" : `${fmt((E - 1) * 100, 1)}%`), tg = Object.entries(L.targets);
+  const wells = L.rows.filter(w => w.amplification || w.cq !== null);
+  return card(h("h2", null, "Per-well efficiency (LinRegPCR)"),
+    h("p", { class: "lede" }, "Efficiency worked out from each well's own amplification curve, with no dilution series: LinRegPCR sets a baseline per well, picks a window in the log-linear phase for each target, and fits a line there. Each target's efficiency is the mean over its wells that reached a plateau, with outliers left out. Cq is then read at one common threshold with that mean efficiency, and N0 is the starting fluorescence it implies."),
+    L.warnings.map(w => h("p", { class: "warn-line" }, w)),
+    h("div", { class: "tablewrap" }, h("table", { class: "tbl" },
+      h("thead", null, h("tr", null, ["Target", "Mean efficiency", "SD", "Wells used", "Window (fluorescence)", ""].map(x => h("th", null, x)))),
+      h("tbody", null, tg.map(([t, v]) => {
+        const all = L.rows.filter(w => w.target === t).length, low = v.meanEff != null && (v.meanEff < 1.8 || v.meanEff > 2.1);
+        return h("tr", { class: low ? "flag" : "" }, h("td", null, t), h("td", { class: "num" }, v.meanEff == null ? "—" : `${fmt(v.meanEff, 3)} (${pct(v.meanEff)})`), h("td", { class: "num" }, v.sdEff == null ? "—" : fmt(v.sdEff, 3)),
+          h("td", { class: "num" }, `${v.n} of ${all}`), h("td", { class: "num" }, `${fmt(v.lower, 3)} – ${fmt(v.upper, 3)}`),
+          h("td", null, v.meanEff == null ? "No well with a plateau; no efficiency" : low ? "Outside 80–110%: check the curves" : ""));
+      })))),
+    h("p", { class: "fine" }, `Common threshold ${fmt(L.threshold, 4)} (fluorescence units, after each well's baseline). ${wells.length} of ${L.rows.length} curves amplified.`),
+    h("details", null, h("summary", null, `Every well (${L.rows.length})`),
+      h("div", { class: "tablewrap" }, h("table", { class: "tbl" },
+        h("thead", null, h("tr", null, ["Well", "Sample", "Target", "Efficiency", "R²", "Points", "Cq (LinRegPCR)", "Cq (instrument)", "N0", "Used for mean", "Notes"].map(x => h("th", null, x)))),
+        h("tbody", null, L.rows.map(w => { const why = LR.whyNotUsed(w);
+          return h("tr", { class: "click", tabindex: 0, onclick: () => { st.selFinding = null; st.sel = new Set([C.wellKey(w.key)].filter(Boolean)); renderMain(); } },
+            h("td", null, w.key), h("td", null, w.sample), h("td", null, w.target), h("td", { class: "num" }, w.eff == null ? "—" : fmt(w.eff, 3)), h("td", { class: "num" }, w.r2 == null ? "—" : fmt(w.r2, 4)),
+            h("td", { class: "num" }, w.nIncluded), h("td", { class: "num" }, w.cq == null ? "—" : fmt(w.cq, 2)), h("td", { class: "num" }, w.instrumentCt == null ? "—" : fmt(w.instrumentCt, 2)),
+            h("td", { class: "num" }, w.n0 == null ? "—" : w.n0.toExponential(2)), h("td", null, why || "yes"), h("td", null, [...w.excl, ...w.notes].join("; ")));
+        }))))),
+    h("p", { class: "fine" }, "Method: Ruijter et al. (2009) Nucleic Acids Res 37:e45; Untergasser et al. (2021) BMC Bioinformatics 22:398. Ported from rdmlpython 1.7.2 (MIT licence) and checked against it on 1,976 reactions from the RDML example files: every efficiency, Cq and N0 agrees to 12 or more significant digits."),
+    h("div", { class: "row" }, h("button", { class: "btn", type: "button", onclick: () => download(`${st.exp.id}-linregpcr.csv`, LR.linregCsv(L, C.toCsv), "text/csv") }, "Download per-well efficiency (CSV)")));
 }
 
 // ---------------------------------------------------------------- Analysis (workstream 2; the views are in ui-analysis.js)

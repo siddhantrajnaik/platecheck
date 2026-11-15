@@ -255,8 +255,10 @@ function settingsPanel(ax, s, info, set) {
       h("small", null, "You pick these. I only mark names that are often used as references; whether a gene is stable in your samples is something only your data and your judgement can tell. With several, I use the mean of their Ct values.")),
     info.groups.length ? sel("Control group", s.control, [["", "Choose…"], ...info.groups.map(g => [g, g])], "control", "Control group")
       : h("p", { class: "warn" }, "No sample has a group label yet. Add groups (for example control and treated) on the Plate step, or in your file."),
-    h("label", { class: "check" }, h("input", { type: "checkbox", checked: s.efficiency, disabled: !info.hasCurves && !s.efficiency, onchange: e => set({ efficiency: e.target.checked }, `Efficiency correction ${e.target.checked ? "on" : "off"}`) }),
-      "Correct for amplification efficiency (Pfaffl)", h("small", { class: "muted" }, info.hasCurves ? " uses the standard curves on the plate" : " needs a standard curve; none on this plate")),
+    h("label", { class: "check" }, h("input", { type: "checkbox", checked: s.efficiency, disabled: !info.hasCurves && !info.hasAmp && !s.efficiency, onchange: e => set({ efficiency: e.target.checked }, `Efficiency correction ${e.target.checked ? "on" : "off"}`) }),
+      "Correct for amplification efficiency (Pfaffl)", h("small", { class: "muted" }, info.hasCurves || info.hasAmp ? "" : " needs a standard curve or amplification curves; this plate has neither")),
+    s.efficiency && sel("Efficiencies from", s.effSource, [["std", "Standard curves (dilution series)"], ["linreg", "Amplification curves, per-well LinRegPCR"]], "effSource", "Efficiencies from"),
+    s.efficiency && s.effSource === "linreg" && h("small", { class: "muted" }, "Each target's mean efficiency over its wells with a plateau, as LinRegPCR works it out from the raw curves (outliers left out). Needs raw fluorescence, not baseline-subtracted ΔRn. The wells are listed on the Review step, under “Per-well efficiency”."),
     h("label", { class: "field" }, h("span", null, "Statistical test"),
       h("select", { "aria-label": "Statistical test", onchange: e => set({ test: e.target.value }, `Statistical test: ${A.TESTS[e.target.value]?.label ?? e.target.value}`) },
         Object.entries(A.TESTS).map(([v, t]) => h("option", { value: v, selected: v === s.test }, t.label))),
@@ -367,7 +369,7 @@ export function analysisView(ax) {
   const a = A.analyzeRun(st.exp, st.res, s);
   const base = (st.exp.title || st.exp.id).replace(/[^\w.-]+/g, "_").slice(0, 60) || "run";
   return [card(h("h2", null, "Analysis settings"),
-      settingsPanel(ax, s, { targets: ch.targets, groups: ch.groups, hasCurves: (st.res.stdCurves || []).length > 0 }, set),
+      settingsPanel(ax, s, { targets: ch.targets, groups: ch.groups, hasCurves: (st.res.stdCurves || []).length > 0, hasAmp: !!st.res.amp }, set),
       h("div", { class: "row" }, h("button", { class: "btn", type: "button", onclick: () => set({ on: false }, "Analysis switched off") }, "Switch the analysis off"))),
     ...resultsBlock(ax, a, base), stabilityCard(ax, s, set, ch.targets), a.ok && a.summary.some(r => !r.isControl) && gseaCard(ax, a, base)].filter(Boolean);
 }
@@ -562,7 +564,7 @@ export function studyView(ax) {
   };
   const { runs, missing } = loadRuns(ax, sd.runs);
   const ch = runs.map(r => A.choices(r.res));
-  const info = { targets: [...new Set(ch.flatMap(c => c.targets))], groups: [...new Set(ch.flatMap(c => c.groups))], hasCurves: runs.some(r => r.res.stdCurves?.length), excluded: false, study: true };
+  const info = { targets: [...new Set(ch.flatMap(c => c.targets))], groups: [...new Set(ch.flatMap(c => c.groups))], hasCurves: runs.some(r => r.res.stdCurves?.length), hasAmp: runs.some(r => r.res.amp), excluded: false, study: true };
   const shared = A.sharedUnits(runs);
   const toggleRun = id => save({ runs: sd.runs.includes(id) ? sd.runs.filter(x => x !== id) : [...sd.runs, id] });
   const out = [head, card(h("h2", null, "Study"),

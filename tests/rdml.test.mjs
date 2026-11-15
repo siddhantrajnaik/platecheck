@@ -25,11 +25,12 @@ test("every reaction of the example RDML files reads as lxml reads it (well, sam
   let n = 0;
   for (const [f, url] of files) {
     const b = await R.readRdml(f, readFileSync(url)), run = b.rdml.runs[0];
+    const lr = run.warnings.some(w => /worked out Cq from the raw curves/.test(w)); // raw-only run: Cq comes from LinRegPCR (tests/linreg.test.mjs)
     const rows = C.parseResults(run.results).rows, amp = run.amp ? C.parseCurves(run.amp, "amp").series : {}, melt = run.melt ? C.parseCurves(run.melt, "melt").series : {};
     assert.equal(rows.length, ref[f].length, f);
     ref[f].forEach(([well, s, t, cq, na, nm], i) => { const r = rows[i], c = C.ctNum(r.ct); n++;
       assert.deepEqual([r.key, r.sample, r.target], [well, s, t], `${f} #${i}`);
-      assert.ok(cq === null ? c === null : Math.abs(c - cq) < 1e-9, `${f} ${well} cq`);
+      if (!lr) assert.ok(cq === null ? c === null : Math.abs(c - cq) < 1e-9, `${f} ${well} cq`);
       assert.equal(amp[`${well}|${t}`]?.length || 0, na, `${f} ${well} adp`); assert.equal(melt[`${well}|${t}`]?.length || 0, nm, `${f} ${well} mdp`); });
   }
   assert.ok(n >= 418, `${n} reactions`); // 418 in the committed files; 1778 with the downloaded rdml-tools files
@@ -51,7 +52,7 @@ test("sample types, standards, groups from annotations, exclusions and Cq −1 a
     assert.equal(two.rdml.runs.length, 2); assert.match(two.best.results.why, /2 runs/); assert.equal(two.best.results.alternatives.length, 1);
   }
   const raw = await R.readRdml("m.rdml", readFileSync(P("py_matrix_gaps.rdml")));
-  assert.match(raw.rdml.runs[0].warnings[0], /no Cq values/);
+  assert.match(raw.rdml.runs[0].warnings[0], /no Cq values, so PlateCheck worked out Cq/);
   assert.equal(await R.readRdml("x.rdml", new TextEncoder().encode("Well,Ct\nA1,20\n")), null); // not a zip
 });
 test("export → import gives the same wells, samples, targets, Cq, roles and curves", async () => {
