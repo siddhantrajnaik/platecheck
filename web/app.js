@@ -9,6 +9,7 @@ import * as M from "./miqe.js"; // MIQE 2.0 checklist
 import { analyzeRun } from "./analysis.js";
 import { CREDIT } from "./credit.js";
 import { readWorkbook } from "./excel.js";
+import { readRdml, rdmlZip, rdmlNotes } from "./rdml.js"; // RDML import and export
 import { evidenceNote, variabilityCard } from "./ui-variability.js"; // thresholds workstream
 import { assayView } from "./ui-assays.js"; // assay types (ChIP, MSRE, 3C…): workstream 4
 import { analysisView, studyView } from "./ui-analysis.js"; // analysis module (workstream 2)
@@ -78,11 +79,17 @@ async function readText(file) { return C.decodeBytes(await file.arrayBuffer()); 
 async function readAny(file) {
   const buf = await file.arrayBuffer(), d = C.decodeBytes(buf);
   if (!d.binary || d.binary === "unknown") return d;
-  const workbook = await readWorkbook(file.name, buf).catch(() => null);
+  // RDML (a zip with rdml_data.xml) reads like a workbook: each run is a "sheet" with results, curves and melt.
+  if (/\.rdml$/i.test(file.name)) {
+    const rdml = await readRdml(file.name, buf).catch(err => ({ error: err }));
+    if (rdml && !rdml.error) return { workbook: rdml };
+    return { binary: true, message: `this .rdml file couldn't be read (${rdml?.error?.message || "it isn't an RDML zip"}).` };
+  }
+  const workbook = await readWorkbook(file.name, buf).catch(() => null) || await readRdml(file.name, buf).catch(() => null);
   return workbook ? { workbook } : d;
 }
-const ACCEPT = ".csv,.txt,.tsv,.xlsx,.xls,.ods,text/csv,text/plain,text/tab-separated-values";
-const noExt = n => n.replace(/\.(csv|txt|tsv|xlsx|xls|ods)$/i, "");
+const ACCEPT = ".csv,.txt,.tsv,.xlsx,.xls,.ods,.rdml,text/csv,text/plain,text/tab-separated-values";
+const noExt = n => n.replace(/\.(csv|txt|tsv|xlsx|xls|ods|rdml)$/i, "");
 function download(name, text, type) {
   const url = URL.createObjectURL(new Blob([text], { type }));
   const a = h("a", { href: url, download: name }); document.body.append(a); a.click(); a.remove();
@@ -259,7 +266,7 @@ async function quickFiles(fileList) {
   const packet = decoded.find(d => d.text && /^\s*\{/.test(d.text) && /"assaylint-packet"/.test(d.text.slice(0, 400)));
   if (packet) return importPacket(packet.file);
   const binary = decoded.filter(d => d.binary);
-  if (binary.length && binary.length === decoded.length) { flash(`${binary.map(d => d.file.name).join(", ")}: ${C.BINARY_MESSAGE}`, true); return render(); }
+  if (binary.length && binary.length === decoded.length) { flash(binary.map(d => `${d.file.name}: ${d.message || C.BINARY_MESSAGE}`).join(" "), true); return render(); }
   const items = [], emptyBooks = [];
   for (const d of decoded) {
     if (d.text != null) items.push({ name: d.file.name, text: d.text, encoding: d.encoding, ...C.detectFileKind(d.text) });
@@ -292,10 +299,16 @@ async function quickFiles(fileList) {
     if (c.kind === "melt") { e.ruleset.values.meltChecks = true; C.logAudit(e, a, "ruleset.edit", "Melt-curve checks turned on because a melt file was added"); }
   }
   // How each file is named in the note: a sheet of the same workbook is just "sheet “Amplification Data”".
-  const label = i => (!i.workbook ? i.name : i !== r && i.workbook.name === r.workbook?.name ? `sheet “${i.workbook.sheet}”` : `${i.workbook.name}, sheet “${i.workbook.sheet}”`);
+  // RDML files hold runs rather than sheets; their curves come from the same run as the results.
+  const part = i => (i.workbook?.rdml ? `the ${i.kind === "amp" ? "amplification" : "melt"} data of the same run` : `sheet “${i.workbook.sheet}”`);
+  const label = i => (!i.workbook ? i.name : i !== r && i.workbook.name === r.workbook?.name ? part(i) : i.workbook.rdml ? `${i.workbook.name}, run “${i.workbook.sheet}”` : `${i.workbook.name}, sheet “${i.workbook.sheet}”`);
+  const rd = r.workbook?.rdml;
   st.quick = { id: e.id, files: [r, ...items.filter(i => i.kind === "amp" || i.kind === "melt")].map(label), skipped: unread.map(u => u.name),
     rows: r.parsed?.rows.length, format: r.parsed && C.FORMATS[r.parsed.format], melt: e.melt?.valueType,
-    otherSheets: r.alternatives?.length ? { used: r.workbook.sheet, others: r.alternatives, why: r.why || null } : null };
+    otherSheets: r.alternatives?.length ? { used: r.workbook.sheet, others: r.alternatives, why: r.why || null } : null,
+    curvesOf: rd ? items.filter(i => (i.kind === "amp" || i.kind === "melt") && i.workbook?.name === r.workbook.name).map(i => (i.kind === "amp" ? "amplification" : "melt")) : null,
+    // what the RDML file says that matters here: no Cq values, left-out reactions, which targets it marks as references
+    rdml: rd ? [...rd.warnings, ...(rd.references.length ? [`The RDML file marks ${rd.references.join(", ")} as reference gene${rd.references.length > 1 ? "s" : ""}; choose ${rd.references.length > 1 ? "them" : "it"} as references in the Analysis step.`] : [])] : [] };
   st.tab = r.needsPlateSize ? "data" : "findings";
   reanalyze(); persist(); render(); scrollTo(0, 0);
 }
@@ -303,8 +316,9 @@ function quickNote() {
   const q = st.quick;
   if (!q || q.id !== st.exp.id || !st.exp.source) return null;
   return h("div", { class: "quick-note" },
-    h("p", null, `Read ${q.rows} rows from ${q.files[0]}` + (q.files.length > 1 ? `, plus the curves in ${q.files.slice(1).join(" and ")}` : "") + "." +
+    h("p", null, `Read ${q.rows} rows from ${q.files[0]}` + (q.curvesOf?.length ? `, with its ${q.curvesOf.join(" and ")} curves` : q.files.length > 1 ? `, plus the curves in ${q.files.slice(1).join(" and ")}` : "") + "." +
       (q.melt ? ` Melt values were read as ${q.melt}; if that's wrong, change it on the Upload page.` : "") + (q.skipped.length ? ` I couldn't read ${q.skipped.join(", ")}, so it was left out.` : "")),
+    (q.rdml || []).map(t => h("p", { class: "warn-line" }, t)),
     q.otherSheets?.why ? h("p", { class: "warn-line" }, q.otherSheets.why) : q.otherSheets && h("p", { class: "warn-line" }, `Check the sheet: this workbook has other sheets that also look like results (${q.otherSheets.others.map(s => `“${s}”`).join(", ")}). I used “${q.otherSheets.used}”. If that's the wrong one, open the Upload page, click Replace and pick the right sheet.`),
     h("div", { class: "row" },
       h("button", { class: "link", type: "button", onclick: () => goTab("data") }, "See what was read"),
@@ -392,7 +406,7 @@ async function stage(kind, file) {
   if (!file) return;
   if (file.size > 25e6) { flash(`${file.name} is larger than 25 MB and was not read.`, true); renderMain(); return; }
   const d = await readAny(file);
-  if (d.binary) { flash(`${file.name}: ${C.BINARY_MESSAGE}`, true); renderMain(); return; }
+  if (d.binary) { flash(`${file.name}: ${d.message || C.BINARY_MESSAGE}`, true); renderMain(); return; }
   if (d.workbook) {
     const s = d.workbook.best[kind] || d.workbook.all[0];
     return stageText(kind, s.name, s.text, undefined, { workbook: s.workbook, sheets: d.workbook.all.length > 1 ? d.workbook.all : null });
@@ -1010,6 +1024,10 @@ VIEWS.report = () => {
         h("div", { class: "exports" },
           box("Well data (CSV)", "Every well with its labels and the values exactly as exported.", "Download CSV", go("Well data", `${base}-wells.csv`, () => R.wellsCsv(st.res), "text/csv")),
           box("Flags (CSV)", "One row per flag with the evidence and your decision.", "Download CSV", go("Findings", `${base}-flags.csv`, () => R.findingsCsv(st.exp, st.res), "text/csv")),
+          box("RDML", "The run in the standard qPCR data format (RDML 1.3: plate, samples, targets, Cq and raw curves), for RDML-Tools, LinRegPCR and other qPCR software.", "Download RDML", async () => {
+            const name = `${base}.rdml`, notes = rdmlNotes(st.exp, st.res);
+            download(name, await rdmlZip(st.exp, st.res), "application/zip"); log("RDML", name, true);
+            if (notes.length) flash(`RDML saved. Not in the file: ${notes.join(" ")}`); }),
           box("Results (JSON)", "Everything above in one structured file, for scripts.", "Download JSON", go("Structured results", `${base}-results.json`, () => R.structuredJson(st.exp, st.res), "application/json")),
           box("Whole run (packet)", "The run with its original files and history. Open it here again later with “Open a run you saved earlier”.", "Download packet", go("Experiment packet", `${base}.platecheck.json`, () => R.packetJson(st.exp, st.res), "application/json"))))),
     miqeCard(base, log),

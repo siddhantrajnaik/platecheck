@@ -34,6 +34,31 @@ Detected layouts:
 
 Excel workbooks: each sheet is classified as results, amplification or melt, and the instrument-named sheet is preferred. Newer QuantStudio workbooks have no Quantity column on “Results”; when another sheet (“Standard Curve Result”) repeats every well with the same Cq and also has the standards' quantities, that sheet is used and the upload note says why.
 
+## RDML
+
+RDML (Real-time PCR Data Markup Language, https://rdml.org; Lefever et al. 2009, Ruijter et al. 2015) is the standard exchange format for qPCR data and the format MIQE 2.0 asks raw data to be shared in. An `.rdml` file is a zip with `rdml_data.xml`. Code: `web/rdml.js`.
+
+**Import.** Drop an `.rdml` file like any results file. Each run in it is read like a workbook sheet: its reactions become the results table (well from the react number and the plate format, sample, target, Cq, sample type, quantity, group, exclusion), its `adp` points the amplification curves and its `mdp` points the melt curves (raw fluorescence). Mapping:
+
+| RDML | PlateCheck |
+|---|---|
+| sample type `unkn` (or none, as in RDML 1.4) | sample |
+| `std` with `quantity` | standard, with that quantity |
+| `ntc`, `nac` (no amplification control), `ntp` (no target present) | no-template control |
+| `nrt` | no-RT control |
+| `pos` | positive control |
+| `opt` (optical calibrator) | left out, with a note |
+| sample annotation Group, Condition, Biological group, Biological replicate, Treatment or Genotype | group |
+| `cq` missing or −1 | Undetermined |
+| `excl` | excluded on the instrument (like QuantStudio's Omit) |
+| target type `ref` | named in the upload note, to choose as references in the Analysis step |
+
+A file with several runs uses the first and says so; load another with Replace. Runs with curves but no Cq values (raw-data-only RDML) can be read but not checked; the note says to export Cq values first (instrument software, or RDML-Tools' LinRegPCR).
+
+**Export.** Report step, Other formats, "Download RDML": RDML 1.3 with the plate format, samples (type, standards' quantity, group and biological unit as annotations), targets (type `ref` for the analysis references; standard-curve efficiency where there is one), and per reaction the Cq, the exclusion flag and the raw amplification and melt points. What RDML can't hold is listed after the download: wells without a plate position or target, reactions without a sample name (the well name is used), Cq values that aren't numbers, a second result for the same target in one well, and melt curves that are derivative values (RDML holds raw melt fluorescence).
+
+**Checked against:** the reading of 14 example files from the RDML consortium (rdmlpython and RDML-Tools; RDML 1.3 and 1.4; 1,778 reactions) equals an independent lxml reading of the same files for every reaction: well, sample, target, Cq, and number of amplification and melt points. Exports of four of those files and of the demo run pass the RDML 1.3 schema validation of rdmlpython 1.7.2, and reading an export back gives the same wells, samples, targets, Cq, roles, exclusions, curves, standard curves and flags (`tests/rdml.test.mjs`).
+
 Ct columns named after the dye (`Ct SYBR`, `Cq FAM`, `Cp SYBR Green`) or `CT Value` are read as the Ct/Cq column; only known dye names are accepted, so summary columns such as `Ct Mean`, `Ct SD` or `Ct Threshold` never are. Well positions with a run prefix (`Exp2 A5`) are read from the last word, with a warning; several different prefixes in one file usually mean several plates, and the warning says to split the file. Positions listed with no sample, target, role or Ct (LightCycler lists all 96) are treated as empty wells.
 
 A `Tm` / `Tm1` column (and `Tm2` when the software reports a second peak) is read too. Without a melt-curve file, each product well's Tm is compared with its target's median (the same ±1 °C tolerance as melt curves), and a reported Tm2 is flagged as a possible second product. Peak heights and NTC peaks need the melt-curve file.

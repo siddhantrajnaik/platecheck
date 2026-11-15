@@ -18,6 +18,13 @@ for (const s of JSON.parse(readFileSync(join(root, "sources.json"), "utf8"))) {
 }
 
 // Figshare files (CC BY 4.0) too large to keep in git. Saved as bytes; tests skip them when absent.
+// RDML-Tools example files (GPL-3.0; RDML consortium): binary zips, used by tests/rdml.test.mjs when present.
+for (const n of ["absolute", "relative", "sample", "test_2_raw_data", "two_plate_correction", "meltingcurveanalysis"]) {
+  const dir = join(root, "public", "rdml-tools"); mkdirSync(dir, { recursive: true });
+  const r = await fetch(`https://raw.githubusercontent.com/RDML-consortium/rdml-tools/HEAD/client/src/static/bin/${n}.rdml`);
+  if (!r.ok) { console.log(`✖ rdml-tools ${n}: HTTP ${r.status}`); continue; }
+  const b = new Uint8Array(await r.arrayBuffer()); writeFileSync(join(dir, `tools_${n}.rdml`), b); console.log(`✔ rdml-tools ${n}.rdml (${b.length} bytes)`);
+}
 const FIGSHARE = [
   { file: 64766826, dir: "figshare__30833918", name: "Greenland_Tb_qPCR results.xlsx", note: "QuantStudio workbook (Lauringson et al. 2026), doi:10.6084/m9.figshare.30833918" },
 ];

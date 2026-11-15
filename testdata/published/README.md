@@ -20,3 +20,6 @@ Files are copied unchanged. They are used only to compare PlateCheck's numbers w
 | `refgenes/genorm_data.csv` | `geNorm.qPCRBatch` from the Bioconductor package NormqPCR (relative quantities of 10 candidate reference genes in 85 samples from 5 tissues) | Vandesompele et al. 2002, Genome Biology 3:research0034, doi:10.1186/gb-2002-3-7-research0034 |
 | `refgenes/bladder_data.csv` | `Bladder` from NormqPCR (14 genes, 28 bladder tumours in 3 grades) | Andersen et al. 2004, Cancer Research 64:5245, doi:10.1158/0008-5472.CAN-04-0496 |
 | `refgenes/ref.json`, `ref.R` | NormqPCR 1.x `stabMeasureM`, `selectHKs` (geNorm, NormFinder) and `stabMeasureRho` on those data (R 4.3.2) | Perkins et al. 2012, BMC Genomics 13:296, doi:10.1186/1471-2164-13-296 |
+| `rdml/py_*.rdml` | example RDML files from rdmlpython (RDML consortium, MIT licence), `experiments/technical` and `experiments/untergasser`, unchanged | https://github.com/RDML-consortium/rdmlpython |
+| `rdml/lxml_reading.json`, `lxml_reading.py` | well, sample, target, Cq and point counts per reaction, read with lxml (not PlateCheck) from these files and from the rdml-tools examples | |
+| (fetched) `public/rdml-tools/*.rdml` | example RDML files from RDML-Tools (GPL-3.0), downloaded by `testdata/fetch-public.mjs`, not stored here | https://github.com/RDML-consortium/rdml-tools |
