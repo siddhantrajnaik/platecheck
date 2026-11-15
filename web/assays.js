@@ -111,7 +111,7 @@ export const FAMILIES = {
       "Equal ng per well instead of equal volume (Solomon 2021): DF = (100 / input %) × (input DNA recovered / ng per input well) ÷ (IP DNA recovered / ng per IP well)", "% input = 100 × E^(adjusted input Ct − Ct(IP))", "Fold over IgG = E^(Ct(IgG) − Ct(IP))", "Fold over negative region = % input(region) / % input(negative region)"],
     refs: ["haring2007", "solomon2021", "mukhopadhyay2008"] },
   msre: { name: "% methylation from digested vs mock", roles: ["digested", "mock"], params: [P.enzyme, P.noSiteTarget, P.calibratorSet],
-    formula: ["ΔCt = Ct(digested) − Ct(mock)", "Methylation-sensitive enzyme: % methylated = 100 × E^(−ΔCt)", "Methylation-dependent enzyme: % methylated = 100 × (1 − E^(−ΔCt))", "With a fully methylated control: ΔCt is replaced by ΔCt(sample) − ΔCt(control)"],
+    formula: ["ΔCt = Ct(digested) − Ct(mock)", "Methylation-sensitive enzyme: % methylated = 100 × E^(−ΔCt)", "Methylation-dependent enzyme: % methylated = 100 × (1 − E^(−ΔCt))", "With a fully methylated control, sensitive enzyme: ΔCt is replaced by ΔCt(sample) − ΔCt(control)", "With a fully methylated control, dependent enzyme: % methylated = 100 × (1 − E^(−ΔCt(sample))) / (1 − E^(−ΔCt(control)))"],
     refs: ["oakes2006", "redshaw2014"] },
   pmr: { name: "Percent of methylated reference (PMR)", roles: ["test", "meth_ref"], params: [P.controlTargetPmr],
     formula: ["ΔCt = Ct(methylation reaction) − Ct(control reaction), in the same DNA", "PMR = 100 × E^−(ΔCt(sample) − ΔCt(fully methylated reference))",
@@ -456,14 +456,19 @@ export function calcMsre(lr, params, opts, warn) {
       row.note = dep ? "Digested did not amplify: close to 100%" : `Digested did not amplify: below ${bound < 0.01 ? "0.01" : fmtNum(bound, 2)}%`;
       warn("low", `${at}: the digested DNA did not amplify, so it was cut completely (${row.note.split(": ")[1]} methylated).`, d.wells);
     }
-    const x = corr(s, t);
-    let f = left(s, t);
+    const x = corr(s, t), f = left(s, t);
+    let pct = f === null ? null : dep ? 100 * (1 - f) : 100 * f;
     if (x !== null && cal && s !== cal) {
-      const c = corr(cal, t);
-      if (c === null) { warn("medium", `${at}: the fully methylated set has no usable ${t} result, so this value isn't scaled to it.`); }
-      else { row.ddCt = x - c; f = f / left(cal, t); }
+      const c = corr(cal, t), fc = c === null ? null : left(cal, t);
+      if (c === null || fc === null) warn("medium", `${at}: the fully methylated set has no usable ${t} result, so this value isn't scaled to it.`);
+      // Sensitive enzyme: methylated DNA survives, so the control's fraction left (≈ 1) is the 100% level: f / f(control),
+      // which is ΔCt(sample) − ΔCt(control). Dependent enzyme: methylated DNA is cut, so the control's fraction cut
+      // (1 − f(control)) is the 100% level: 100 × (1 − f) / (1 − f(control)). Dividing by f(control) there would be wrong.
+      else if (!dep) { row.ddCt = x - c; if (f !== null) pct = 100 * f / fc; }
+      else if (1 - fc > 1e-9) { if (f !== null) pct = 100 * (1 - f) / (1 - fc); }
+      else warn("medium", `${at}: the fully methylated set was not cut by the methylation-dependent enzyme (nothing removed), so this value isn't scaled to it. Check the control DNA and the digestion.`);
     }
-    if (f !== null) row.pctMeth = dep ? 100 * (1 - f) : 100 * f;
+    if (pct !== null) row.pctMeth = pct;
     if (row.pctMeth !== null && (row.pctMeth > 100.5 || row.pctMeth < -0.5))
       warn("medium", `${at}: ${fmtNum(row.pctMeth, 1)}% is outside 0–100%. It is shown as calculated, not clipped. Digestion can only remove template, so a value past 0–100% usually means the digested and mock wells didn't get the same amount of DNA. Check the DNA input and pipetting for this sample.`, row.wells);
     out.push(row);

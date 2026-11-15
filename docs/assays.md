@@ -124,9 +124,14 @@ IgG % input uses the IgG DNA recovered if you enter it; otherwise it's left empt
     methylation-sensitive enzyme:  % methylated = 100 × 2^(−ΔCt)
     methylation-dependent enzyme:  % methylated = 100 × (1 − 2^(−ΔCt))
 
-With a region without a cut site, its ΔCt is subtracted from each region's ΔCt. With a fully methylated control, ΔCt is replaced by ΔCt(sample) − ΔCt(control) (ΔΔCt), as Redshaw et al. did.
+With a region without a cut site, its ΔCt is subtracted from each region's ΔCt. With a fully methylated control the result is scaled so that the control reads 100%, which works differently for the two enzyme types:
 
-**Worked example.** Mock 24, digested 25: ΔCt 1, so 50% methylated with either enzyme type. Mock 24, digested 26: 25% with a sensitive enzyme, 75% with a dependent one. With a no-site region that moved 0.5 cycles and a fully methylated control at ΔCt 0.5 (after the same correction, 0), a sample at ΔCt 1.5 gives (1.5 − 0.5) − 0 = 1, so 50%.
+    sensitive enzyme (methylated DNA survives):  ΔCt is replaced by ΔCt(sample) − ΔCt(control) (ΔΔCt), as Redshaw et al. did
+    dependent enzyme (methylated DNA is cut):    % methylated = 100 × (1 − 2^(−ΔCt(sample))) / (1 − 2^(−ΔCt(control)))
+
+With a dependent enzyme the fully methylated control is cut, so the 100% level is the fraction of the control that was cut, not the fraction left; the ΔΔCt column is left empty there. (Before November 2026 PlateCheck used the ΔΔCt form for both, which gives impossible values, for example −1500%, with a dependent enzyme and a well-cut control.)
+
+**Worked example.** Mock 24, digested 25: ΔCt 1, so 50% methylated with either enzyme type. Mock 24, digested 26: 25% with a sensitive enzyme, 75% with a dependent one. With a no-site region that moved 0.5 cycles and a fully methylated control at ΔCt 0.5 (after the same correction, 0), a sample at ΔCt 1.5 gives (1.5 − 0.5) − 0 = 1, so 50% (sensitive enzyme). Dependent enzyme with a fully methylated control at ΔCt 5 (fraction left 1/32, so 96.9% cut): a sample at ΔCt 1 (half cut) gives 100 × 0.5 / 0.969 = 51.6%.
 
 **What gets flagged:** mock that never amplified; digested DNA that never came up (with a sensitive enzyme that means it was cut completely, shown as "below x%"); values outside 0–100%; a no-site region that moved more than one cycle.
 
