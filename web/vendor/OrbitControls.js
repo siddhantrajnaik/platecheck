@@ -9,7 +9,7 @@ import {
 	Plane,
 	Ray,
 	MathUtils
-} from 'three';
+} from './three.module.js'; // was 'three' (import map); a relative path needs no import map (older Safari)
 
 /**
  * Fires when the camera has been transformed by the controls.

@@ -1,6 +1,6 @@
 // 3D plate view (three.js, vendored in ./vendor). Matches the 2D plate map: a matte plate with the A1 corner cut,
 // wells that hold data sit in their openings, and only flagged wells carry colour.
-import * as THREE from "three";
+import * as THREE from "./vendor/three.module.js";
 import { OrbitControls } from "./vendor/OrbitControls.js";
 
 const COLORS = { high: 0xd14b3f, medium: 0xe09a3a, low: 0xe3cb62, ok: 0xbfc9c4 };

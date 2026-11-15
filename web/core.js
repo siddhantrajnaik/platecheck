@@ -395,10 +395,26 @@ export function sdLimit(values, meanCt) {
   return Math.max(values.sdThreshold, values.sdPoissonK * (poissonSd(meanCt) ?? POISSON_SD_3_COPIES));
 }
 // "c1 -RT", "c1 RT-", "c1_noRT", "NRT c1" → "c1": the sample a no-RT well was made from, as far as the name says.
+// The no-RT words, tried at each position in this order (as one regex with a lookbehind would). Safari before 16.4 can't
+// parse lookbehind, so "the character before isn't a letter or digit" is checked by hand in nrtBaseName.
+const NRT_SUFFIX = String.raw`(?:[\s_-]*(?:control|ctrl)(?![a-z0-9]))?`;
+const NRT_WORD = new RegExp(String.raw`(?:no[\s_-]?rt|nrt|minus[\s_-]?rt|rt[\s_-]?(?:minus|neg(?:ative)?)|nac)(?![a-z0-9])` + NRT_SUFFIX, "y");
+const NRT_DASH_RT = new RegExp(String.raw`[-−–]\s?rt(?![a-z0-9])` + NRT_SUFFIX, "y");
+const NRT_RT_DASH = new RegExp(String.raw`rt[-−–](?![a-z0-9])` + NRT_SUFFIX, "y");
 export function nrtBaseName(s) {
-  return String(s ?? "").toLowerCase()
-    .replace(/(?:(?<![a-z0-9])(?:no[\s_-]?rt|nrt|minus[\s_-]?rt|rt[\s_-]?(?:minus|neg(?:ative)?)|nac)(?![a-z0-9])|[-−–]\s?rt(?![a-z0-9])|(?<![a-z0-9])rt[-−–](?![a-z0-9]))(?:[\s_-]*(?:control|ctrl)(?![a-z0-9]))?/g, " ")
-    .replace(/^[\s_()[\]:,-]+|[\s_()[\]:,-]+$/g, "").replace(/\s+/g, " ");
+  const t = String(s ?? "").toLowerCase();
+  let out = "";
+  for (let p = 0; p < t.length;) {
+    const boundary = p === 0 || !/[a-z0-9]/.test(t[p - 1]);
+    let len = 0;
+    for (const [re, needs] of [[NRT_WORD, true], [NRT_DASH_RT, false], [NRT_RT_DASH, true]]) {
+      if (needs && !boundary) continue;
+      re.lastIndex = p; const m = re.exec(t);
+      if (m) { len = m[0].length; break; }
+    }
+    if (len) { out += " "; p += len; } else out += t[p++];
+  }
+  return out.replace(/^[\s_()[\]:,-]+|[\s_()[\]:,-]+$/g, "").replace(/\s+/g, " ");
 }
 const fmtRaw = v => (v == null ? "(empty)" : `'${v}'`);
 const f2 = x => (x == null ? "—" : x.toFixed(2));

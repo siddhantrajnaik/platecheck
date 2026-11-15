@@ -78,7 +78,7 @@ function speciesHint(raw) {
   let m = PREFIX_RE.exec(raw);
   if (m) return { species: MIR_PREFIX[m[1].toLowerCase()], source: `the “${m[1].toLowerCase()}-” prefix` };
   m = TAQMAN_RE.exec(raw);
-  if (m) return { species: { Hs: "human", Mm: "mouse", Rn: "rat" }[m[1]], source: `the TaqMan assay ID ${m[0]}` };
+  if (m) return { species: { Hs: "human", Mm: "mouse", Rn: "rat" }[m[3]], source: `the TaqMan assay ID ${m[2]}` };
   const first = cleanName(raw).split(/\s+/)[0];
   if (YEAST_ORF.test(first)) return { species: "yeast", source: `${first.toUpperCase()}, which is written like a yeast systematic name` };
   if (AGI_LOCUS.test(first)) return { species: "arabidopsis", source: `${first.toUpperCase()}, which is written like an Arabidopsis locus` };
@@ -86,10 +86,11 @@ function speciesHint(raw) {
   if (/^[a-z][a-z0-9-]*\.[LS]$/i.test(first)) return { species: "xlaevis", source: `the .${first.slice(-1).toUpperCase()} suffix, which Xenbase gives X. laevis homeologs` };
   return null;
 }
-const TAQMAN_RE = /(?<![A-Za-z0-9])(Hs|Mm|Rn)\d{6,8}_[a-z]\d(?![A-Za-z0-9])/;
+// No lookbehind (Safari < 16.4): group 1 is the character before the ID, group 2 the ID, group 3 the species prefix.
+const TAQMAN_RE = /(^|[^A-Za-z0-9])((Hs|Mm|Rn)\d{6,8}_[a-z]\d)(?![A-Za-z0-9])/;
 // Removes assay IDs, bracketed notes and primer-set suffixes that aren't part of the gene name.
 function cleanName(raw) {
-  return raw.replace(new RegExp(TAQMAN_RE.source, "g"), " ").replace(/\([^)]*\)|\[[^\]]*\]/g, " ")
+  return raw.replace(new RegExp(TAQMAN_RE.source, "g"), (m, before) => before + " ").replace(/\([^)]*\)|\[[^\]]*\]/g, " ")
     .replace(/[\s_-]+(primers?|assay|set\s*\d*|pair\s*\d*|fwd|rev|f|r|qpcr|taqman|sybr)$/i, "").replace(/[\s_]+$/, "").replace(/^[\s_]+/, "").replace(/\s+/g, " ").trim();
 }
 

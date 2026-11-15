@@ -39,3 +39,17 @@ test("MSRE, dependent enzyme with a fully methylated control: 100 × (1 − f) /
   const nc = assay("msre", [["S", "digested", "T", 25], ["S", "mock", "T", 24], ["M", "digested", "T", 24], ["M", "mock", "T", 24]], { enzyme: "dependent", calibratorSet: "M" });
   assert.ok(nc.warnings.some(x => /was not cut/.test(x.text))); assert.ok(Math.abs(nc.rows.find(x => x.set === "S").pctMeth - 50) < 1e-9);
 });
+
+// P0-3: no syntax that Safari before 16.4 rejects (regex lookbehind), no import map needed, and a fallback notice.
+import { readFileSync, readdirSync } from "node:fs";
+test("app code has no regex lookbehind and needs no import map; the page explains a failed start", () => {
+  const dir = new URL("../web/", import.meta.url);
+  for (const f of readdirSync(dir).filter(f => f.endsWith(".js")).concat(["vendor/OrbitControls.js"]))
+    assert.ok(!/\(\?<[=!]/.test(readFileSync(new URL(f, dir), "utf8")), `${f} uses a lookbehind`);
+  const html = readFileSync(new URL("index.html", dir), "utf8");
+  assert.ok(!/type="importmap"/.test(html)); assert.match(html, /__plateCheckStarted/);
+  assert.match(readFileSync(new URL("app.js", dir), "utf8"), /window\.__plateCheckStarted = true/);
+  // behaviour of the rewritten no-RT name matcher on the documented examples
+  for (const [s, base] of [["c1 -RT", "c1"], ["c1 RT-", "c1"], ["c1_noRT", "c1"], ["NRT c1", "c1"], ["c1 no-RT control", "c1"], ["c1 minus RT", "c1"], ["xnrt", "xnrt"], ["kd-2 -RT", "kd-2"]])
+    assert.equal(C.nrtBaseName(s), base, s);
+});

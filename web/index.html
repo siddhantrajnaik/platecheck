@@ -12,7 +12,6 @@
 <link rel="preload" href="fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="fonts/ibm-plex-sans-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="style.css">
-<script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
 </head>
 <body>
 <div class="app">
@@ -47,5 +46,18 @@
   <form method="dialog"><button class="btn primary">Close</button></form>
 </dialog>
 <script type="module" src="app.js"></script>
+<!-- If the app never starts (a browser too old for its JavaScript, or no secure context), say so instead of showing a blank page. -->
+<script>
+window.addEventListener("load", function () {
+  setTimeout(function () {
+    if (window.__plateCheckStarted) return;
+    var why = !window.isSecureContext || !(window.crypto && window.crypto.subtle)
+      ? "This page has to be opened over https:// (or from localhost) for PlateCheck to read files."
+      : "This browser is too old for PlateCheck. Please update it: Chrome or Edge 90+, Firefox 100+ or Safari 15.4+ all work.";
+    var main = document.getElementById("main");
+    if (main) main.innerHTML = '<section class="card" style="margin:48px;max-width:640px"><h1>PlateCheck could not start</h1><p>' + why + '</p></section>';
+  }, 4000);
+});
+</script>
 </body>
 </html>

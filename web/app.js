@@ -1012,3 +1012,4 @@ VIEWS.assay = () => assayView({ h, st, card, emptyCard, change, renderMain, flas
 // ---------------------------------------------------------------- start
 const first = S.index()[0];
 if (first) openExp(first.id); else render();
+window.__plateCheckStarted = true; // read by the "browser too old" check in index.html
