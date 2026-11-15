@@ -4,6 +4,7 @@
 // Pure functions, no DOM: the page (ui-assays.js) and the report (assays.js) both use them.
 // The method and the reasons for each scale are written up in docs/assays.md, "Comparing conditions".
 import * as S from "./stats.js";
+import { csvCell } from "./core.js";
 
 const fin = x => typeof x === "number" && Number.isFinite(x);
 const isObj = v => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -181,7 +182,7 @@ export function comparisonTable(c) {
   });
   return { head, rows };
 }
-const csvCell = v => { const s = v === null || v === undefined ? "" : String(v); return /[",\n\r]/.test(s) || /^[=+\-@\t]/.test(s) ? `"${(/^[=+\-@\t]/.test(s) && !/^-?\d/.test(s) ? "'" : "") + s.replace(/"/g, '""')}"` : s; };
+// csvCell (formula-safe cells) is shared with every other CSV export; see core.js.
 const csvNum = x => (fin(x) ? String(+x.toPrecision(10)) : "");
 export function comparisonCsv(c) {
   const lines = [["region", "metric", "test", "test_scale", "condition_a", "n_a", "mean_a", "sd_a", "condition_b", "n_b", "mean_b", "sd_b", "difference_on_test_scale", "effect", "p", "p_adjusted", "correction", "mark"]];

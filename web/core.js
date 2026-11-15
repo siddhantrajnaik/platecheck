@@ -807,8 +807,16 @@ export function mapTemplateCsv(rows) {
   return toCsv([["well", "sample", "target", "group", "role", "bio_unit", "quantity", ...(pair ? ["pair"] : []), ...(f2 ? ["factor2"] : [])],
     ...rows.filter(r => r.key).map(r => [r.key, r.sample, r.target, r.group, r.role, r.bioSource?.startsWith("default") ? "" : r.bio_unit, r.quantity, ...(pair ? [r.pair] : []), ...(f2 ? [r.factor2] : [])])]);
 }
+// One CSV cell. Text that a spreadsheet would run as a formula (starting = + - @ tab or CR, e.g. a sample named
+// =HYPERLINK(…)) gets a leading apostrophe so Excel and LibreOffice show it as text. Numbers ("-0.68", "+1e3") and a lone
+// "-" (a common no-Ct marker) are left as they are.
+export function csvCell(v) {
+  let s = v === null || v === undefined ? "" : String(v);
+  if (/^[=+\-@\t\r]/.test(s) && s !== "-" && s !== "+" && !(s.trim() !== "" && Number.isFinite(Number(s)))) s = "'" + s;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
 export function toCsv(rows) {
-  return rows.map(r => r.map(c => { const s = String(c ?? ""); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(",")).join("\n") + "\n";
+  return rows.map(r => r.map(csvCell).join(",")).join("\n") + "\n";
 }
 
 // ---------------------------------------------------------------- experiments
