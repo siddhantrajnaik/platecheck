@@ -210,7 +210,7 @@ function home() {
         bigDrop(),
         h("div", { class: "home-alt" },
           h("button", { class: "link", type: "button", onclick: loadDemo }, "No file handy? Try it with a sample run"),
-          h("label", { class: "link" }, "Open a run you saved earlier", h("input", { type: "file", accept: ".json,application/json", hidden: true, onchange: e => importPacket(e.target.files[0]) })))),
+          h("label", { class: "link" }, "Open a run you saved earlier", h("input", { type: "file", accept: ".json,application/json", onchange: e => importPacket(e.target.files[0]) })))),
       h("figure", { class: "welcome-plate" }, plateArt(8, 12, lit), h("figcaption", null, "Each well gets the colour of its worst flag. Everything else stays grey."))),
     h("section", { class: "home-time", "aria-label": "By hand and with PlateCheck" },
       h("div", { class: "ht-row" }, h("h2", null, "By hand"),
