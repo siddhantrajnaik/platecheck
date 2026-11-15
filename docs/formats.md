@@ -93,7 +93,8 @@ Import template: `well,sample,target,ct,role,group,bio_unit,quantity` (downloada
 
 | Export | Contents |
 |---|---|
-| `<id>.report.html` | Human-readable report, readable without PlateCheck. Can be printed to PDF. |
+| `<title>-report.pdf` | The report as an A4 PDF, made in the browser (web/report-pdf.js; pdfmake, MIT; IBM Plex fonts embedded, OFL): first page with the run identity, status, finding counts, a plate overview (rings on wells in open findings) and a contents list; then the findings, the method sections and the plate map and history as appendices. Running header with the run ID, footer with the app build, the results file checksum and page numbers. While any finding is unreviewed every page carries a DRAFT · NOT REVIEWED watermark and the footer says how many are open; once all are reviewed the watermark is a faint PlateCheck mark. Vector text, so it can be searched and copied. Nothing is sent anywhere. |
+| `<title>-report.html` | The same report as a web page (Report → Other formats), readable without PlateCheck. |
 | `<id>.wells.csv` | One row per source data row: source line, raw and normalised well, effective labels, role and its source, raw Ct/Cq, and the file's original label values. |
 | `<id>.findings.csv` | One row per finding: ID, rule, rule version, category, severity, description, wells, source lines, evidence, next check, disposition, note, reviewer. |
 | `<id>.results.json` | `format: "assaylint-results"`: experiment context, file metadata and checksums, rule set, checks performed and not assessed, summary, findings, replicate groups, controls, standard curves, reviews and wells. |

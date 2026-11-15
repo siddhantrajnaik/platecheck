@@ -7,6 +7,7 @@ import { plot } from "./charts.js";
 import * as Q from "./absquant.js"; // absolute quantity of unknowns from the standard curves
 import * as M from "./miqe.js"; // MIQE 2.0 checklist
 import * as LR from "./linreg.js"; // per-well efficiency (LinRegPCR)
+import { reportPdf } from "./report-pdf.js"; // the report as a PDF (pdfmake, loaded on first use)
 import { analyzeRun } from "./analysis.js";
 import { CREDIT } from "./credit.js";
 import { readWorkbook } from "./excel.js";
@@ -1049,13 +1050,18 @@ VIEWS.report = () => {
   const box = (title, desc, label, fn) => h("div", { class: "inner" }, h("b", null, title), h("small", { class: "muted" }, desc), h("button", { class: "btn", type: "button", onclick: fn }, label));
   const open = st.res.summary.open;
   return [card(h("h2", null, "Your report"),
-      h("p", { class: "lede" }, "One page with everything: what was checked, every flag with the values behind it, your decisions and notes, and the run details. It opens in any browser, so you can keep it with your notebook or send it to someone." +
+      h("p", { class: "lede" }, "A PDF with everything: what was checked, every flag with the values behind it, your decisions and notes, and the run details, ready to file with your notebook or send to someone. While flags are still open it is marked DRAFT on every page." +
         (open ? ` You still have ${open} flag${open === 1 ? "" : "s"} without a decision; they'll show as not reviewed.` : "")),
       h("div", { class: "row" },
-        h("button", { class: "btn primary big", type: "button", onclick: go("Report", `${base}-report.html`, () => R.reportHtml(st.exp, st.res), "text/html", true) }, "Download report"),
-        h("button", { class: "btn", type: "button", onclick: () => { frame.contentWindow.print(); log("Report print", "print dialog", true); } }, "Print or save as PDF")),
+        h("button", { class: "btn primary big", type: "button", onclick: async e => {
+          const b = e.currentTarget, name = `${base}-report.pdf`;
+          b.disabled = true; b.textContent = "Making the PDF…";
+          try { download(name, await reportPdf(st.exp, st.res), "application/pdf"); log("Report (PDF)", name, true); }
+          catch (err) { b.disabled = false; b.textContent = "Download report (PDF)"; flash(`Couldn't make the PDF (${err.message}). The HTML report under Other formats has the same content.`); }
+        } }, "Download report (PDF)")),
       h("details", { class: "other-formats" }, h("summary", null, "Other formats"),
         h("div", { class: "exports" },
+          box("Report (HTML)", "The same report as a web page. Opens in any browser; print it from there if you need paper.", "Download HTML", go("Report", `${base}-report.html`, () => R.reportHtml(st.exp, st.res), "text/html", true)),
           box("Well data (CSV)", "Every well with its labels and the values exactly as exported.", "Download CSV", go("Well data", `${base}-wells.csv`, () => R.wellsCsv(st.res), "text/csv")),
           box("Flags (CSV)", "One row per flag with the evidence and your decision.", "Download CSV", go("Findings", `${base}-flags.csv`, () => R.findingsCsv(st.exp, st.res), "text/csv")),
           box("RDML", "The run in the standard qPCR data format (RDML 1.3: plate, samples, targets, Cq and raw curves), for RDML-Tools, LinRegPCR and other qPCR software.", "Download RDML", async () => {
