@@ -53,3 +53,57 @@ test("app code has no regex lookbehind and needs no import map; the page explain
   for (const [s, base] of [["c1 -RT", "c1"], ["c1 RT-", "c1"], ["c1_noRT", "c1"], ["NRT c1", "c1"], ["c1 no-RT control", "c1"], ["c1 minus RT", "c1"], ["xnrt", "xnrt"], ["kd-2 -RT", "kd-2"]])
     assert.equal(C.nrtBaseName(s), base, s);
 });
+
+// P0-1: a review decision follows the flag (well + target), never a file line, and is not applied to different values.
+const mkRun = (ntcWell, ntcCt = "30.5", extra = "") => ["Well,Sample Name,Target Name,Task,Cq", "A1,s1,GAPDH,UNKNOWN,20.1", "A2,s1,GAPDH,UNKNOWN,20.2",
+  `${ntcWell},NTC,GAPDH,NTC,${ntcCt}`, "B1,s2,GAPDH,UNKNOWN,21", extra].filter(Boolean).join("\n");
+const load = (exp, text, sha) => { exp.source = C.fileRecord({ name: sha, text, sha, actor: "qa" }); return C.analyze(exp); };
+const decide = (exp, f, note) => { exp.reviews[f.id] = { disposition: "accepted", note, by: "qa", at: "2026-11-15T00:00:00Z", rule: f.rule, rule_version: f.rule_version, title: f.title, description: f.description }; };
+test("a decision on A3 is not applied to H12 when the file is replaced (audit reproduction)", () => {
+  const exp = C.newExperiment({ title: "rev" }, "qa");
+  let r = load(exp, mkRun("A3"), "a"); const f = r.findings.find(x => x.rule === "ntc_amplification");
+  assert.equal(f.id, "ntc_amplification:A3|GAPDH"); assert.equal(r.summary.status, "review_needed");
+  decide(exp, f, "pipetting splash in A3");
+  assert.notEqual(C.analyze(exp).summary.status, "review_needed");
+  r = load(exp, mkRun("H12"), "b"); const g = r.findings.find(x => x.rule === "ntc_amplification");
+  assert.equal(g.id, "ntc_amplification:H12|GAPDH"); assert.equal(C.reviewOf(exp.reviews, g), null);
+  assert.equal(r.summary.status, "review_needed");
+});
+test("the same flag keeps its decision when lines move; different values make it stale", () => {
+  const exp = C.newExperiment({ title: "rev2" }, "qa");
+  let f = load(exp, mkRun("A3"), "a").findings.find(x => x.rule === "ntc_amplification"); decide(exp, f, "ok");
+  // same well, same values, different line (an extra row before it)
+  const moved = ["Well,Sample Name,Target Name,Task,Cq", "C9,s3,GAPDH,UNKNOWN,22", "A1,s1,GAPDH,UNKNOWN,20.1", "A2,s1,GAPDH,UNKNOWN,20.2", "A3,NTC,GAPDH,NTC,30.5", "B1,s2,GAPDH,UNKNOWN,21"].join("\n");
+  let r = load(exp, moved, "c"); f = r.findings.find(x => x.rule === "ntc_amplification");
+  assert.equal(C.reviewOf(exp.reviews, f)?.note, "ok");
+  // same well, different Ct: the decision was about other values, so it's stale
+  r = load(exp, mkRun("A3", "25.0"), "d"); f = r.findings.find(x => x.rule === "ntc_amplification");
+  assert.equal(C.staleReview(exp.reviews, f), true); assert.equal(C.reviewOf(exp.reviews, f), null); assert.equal(r.summary.status, "review_needed");
+});
+test("saved runs: line-keyed decisions move to the new IDs only when made on the same values", () => {
+  const exp = C.newExperiment({ title: "old" }, "qa"); let r = load(exp, mkRun("A3"), "a");
+  const f = r.findings.find(x => x.rule === "ntc_amplification"); assert.equal(f.legacyId, "ntc_amplification:4");
+  exp.reviews = { "ntc_amplification:4": { disposition: "accepted", note: "old", by: "qa", at: "x", description: f.description } };
+  r = C.analyze(exp); assert.equal(r.reviewsMigrated, 1); assert.equal(exp.reviews["ntc_amplification:A3|GAPDH"].note, "old"); assert.ok(!exp.reviews["ntc_amplification:4"]);
+  // an old decision whose line now holds a different well is not moved
+  const e2 = C.newExperiment({ title: "old2" }, "qa"); r = load(e2, mkRun("H12"), "b");
+  e2.reviews = { "ntc_amplification:4": { disposition: "accepted", note: "A3 splash", by: "qa", at: "x", description: "Well A3 something else" } };
+  r = C.analyze(e2); assert.ok(!e2.reviews["ntc_amplification:H12|GAPDH"]); assert.equal(r.summary.status, "review_needed");
+});
+test("two flags of one rule on the same well and target get distinct IDs", () => {
+  const exp = C.newExperiment({ title: "dup" }, "qa");
+  const r = load(exp, ["Well,Sample Name,Target Name,Task,Cq", "A1,s1,GAPDH,UNKNOWN,abc", "A1,s1,GAPDH,UNKNOWN,xyz", "A2,s1,GAPDH,UNKNOWN,20"].join("\n"), "e");
+  const ids = r.findings.map(f => f.id); assert.equal(new Set(ids).size, ids.length);
+  assert.ok(ids.includes("non_numeric_ct:A1|GAPDH") && ids.includes("non_numeric_ct:A1|GAPDH#2"));
+});
+test("a decision goes stale when the evidence values change even if the description doesn't (duplicate well)", () => {
+  const dup = ct => ["Well,Sample Name,Target Name,Task,Cq", "C3,s1,GAPDH,UNKNOWN,24.22", "A1,s2,GAPDH,UNKNOWN,20", `C3,s1,GAPDH,UNKNOWN,${ct}`].join("\n");
+  const exp = C.newExperiment({ title: "dupv" }, "qa");
+  let f = load(exp, dup("24.05"), "a").findings.find(x => x.rule === "duplicate_well_assignment");
+  exp.reviews[f.id] = { disposition: "accepted", by: "qa", at: "x", description: f.description, evidence: C.evidenceKey(f) };
+  assert.ok(!/source line/.test(C.evidenceKey(f)) && /24\.22/.test(C.evidenceKey(f)));
+  f = load(exp, "\n" + dup("24.05"), "b").findings.find(x => x.rule === "duplicate_well_assignment"); // lines moved, same values
+  assert.ok(C.reviewOf(exp.reviews, f));
+  f = load(exp, dup("24.61"), "c").findings.find(x => x.rule === "duplicate_well_assignment");   // same description, other Ct
+  assert.equal(C.staleReview(exp.reviews, f), true);
+});

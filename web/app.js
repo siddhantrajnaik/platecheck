@@ -772,8 +772,9 @@ function sorted(list) {
   return [...list].sort(cmp[by]);
 }
 function setReview(f, patch) {
-  const old = st.exp.reviews[f.id] || {}, next = { ...old, ...patch, by: actor(), at: new Date().toISOString(),
-    rule: f.rule, rule_version: f.rule_version, title: f.title, description: f.description };
+  // A stale decision (made on different values) isn't carried into the new one: the new decision starts fresh.
+  const old = C.reviewOf(st.exp.reviews, f) || {}, next = { ...old, ...patch, by: actor(), at: new Date().toISOString(),
+    rule: f.rule, rule_version: f.rule_version, title: f.title, description: f.description, evidence: C.evidenceKey(f) };
   const what = "disposition" in patch ? `disposition ${C.DISPOSITION_LABEL[old.disposition || "unreviewed"]} → ${C.DISPOSITION_LABEL[patch.disposition]}` : `note: "${old.note || ""}" → "${patch.note}"`;
   change("review", `${f.id}: ${what}`, () => (st.exp.reviews[f.id] = next), { rerender: "disposition" in patch });
 }
@@ -782,21 +783,21 @@ function selectFinding(f, { render = true } = {}) {
   st.sel = new Set(f.wells.map(C.wellKey).filter(Boolean));
   if (render) renderMain();
 }
-const isOpen = f => !C.CLOSED.has(st.exp.reviews[f.id]?.disposition);
+const isOpen = f => !C.CLOSED.has(C.reviewOf(st.exp.reviews, f)?.disposition);
 const needsLook = f => f.severity === "high" || f.severity === "medium";
 // Record a decision, then move on to the next flag that still needs one.
 function decide(f, disposition) {
   const order = sorted(st.res.findings), at = order.findIndex(x => x.id === f.id);
   setReview(f, { disposition });
   const after = [...order.slice(at + 1), ...order.slice(0, at)];
-  const next = after.find(x => needsLook(x) && isOpen(x) && !st.exp.reviews[x.id]?.disposition) || after.find(x => isOpen(x) && !st.exp.reviews[x.id]?.disposition);
+  const next = after.find(x => needsLook(x) && isOpen(x) && !C.reviewOf(st.exp.reviews, x)?.disposition) || after.find(x => isOpen(x) && !C.reviewOf(st.exp.reviews, x)?.disposition);
   if (next) { selectFinding(next, { render: false }); flash(`Saved “${DECISIONS.find(d => d[0] === disposition)[1]}”. Here's the next one.`); renderMain(); }
 }
 const DECISIONS = [["accepted", "Looks fine"], ["not_applicable", "Doesn't apply"], ["unresolved", "Still to fix"], ["resolved", "Fixed"]];
 function plateFlags() {
   const RANK = { high: 3, medium: 2, low: 1 }, flags = new Map();
   for (const f of st.res.findings) {
-    if (f.severity === "info" || C.CLOSED.has(st.exp.reviews[f.id]?.disposition)) continue;
+    if (f.severity === "info" || C.CLOSED.has(C.reviewOf(st.exp.reviews, f)?.disposition)) continue;
     for (const w of f.wells) { const k = C.wellKey(w); if (k && RANK[f.severity] > (RANK[flags.get(k)] || 0)) flags.set(k, f.severity); }
   }
   return flags;
@@ -834,15 +835,16 @@ function targetTones() {
 const cap = s => s[0].toUpperCase() + s.slice(1);
 const sevTag = sev => h("span", { class: "sev " + sev }, cap(sev));
 function findingRow(f) {
-  const rv = st.exp.reviews[f.id] || {}, closed = C.CLOSED.has(rv.disposition), sel = st.selFinding === f.id;
+  const rv = C.reviewOf(st.exp.reviews, f) || {}, closed = C.CLOSED.has(rv.disposition), sel = st.selFinding === f.id, stale = C.staleReview(st.exp.reviews, f);
   const where = f.wells.length ? f.wells.slice(0, 6).join(", ") + (f.wells.length > 6 ? ` and ${f.wells.length - 6} more` : "") : f.target ? `Target ${f.target}` : "Whole run";
   return h("button", { type: "button", class: `frow${sel ? " sel" : ""}${closed ? " closed" : ""}`, "aria-pressed": String(sel), onclick: () => selectFinding(f) },
     sevTag(f.severity),
     h("span", { class: "frow-body" }, h("span", { class: "frow-title" }, f.title), h("span", { class: "frow-sub" }, where)),
-    rv.disposition && rv.disposition !== "unreviewed" && h("span", { class: "frow-disp" }, C.DISPOSITION_LABEL[rv.disposition]));
+    rv.disposition && rv.disposition !== "unreviewed" ? h("span", { class: "frow-disp" }, C.DISPOSITION_LABEL[rv.disposition])
+      : stale && h("span", { class: "frow-disp stale" }, "Needs re-review"));
 }
 function findingDetail(f) {
-  const rv = st.exp.reviews[f.id] || {};
+  const rv = C.reviewOf(st.exp.reviews, f) || {}, old = C.staleReview(st.exp.reviews, f) ? st.exp.reviews[f.id] : null;
   return h("article", { class: "fdetail", "aria-label": "Selected finding" },
     h("div", { class: "fd-head" }, sevTag(f.severity), h("h2", null, f.title)),
     h("p", { class: "fd-desc" }, f.description),
@@ -851,6 +853,7 @@ function findingDetail(f) {
     h("p", null, h("strong", null, "Check next. "), f.next_check),
     h("p", { class: "fd-rule" }, `How this was checked: ${C.RULES[f.rule].checks} Rule ${f.rule}, version ${f.rule_version}.`),
     h("div", { class: "review" },
+      old && h("p", { class: "warn-line stale-note" }, `Needs re-review: an earlier decision here (“${C.DISPOSITION_LABEL[old.disposition || "unreviewed"]}”${old.note ? `, note “${old.note}”` : ""}, by ${old.by} on ${when(old.at)}) was made on different values: “${old.description}${old.evidence ? ` (${old.evidence})` : ""}”. It isn't applied to this flag.`),
       h("p", { class: "rv-q" }, "What do you make of it?"),
       h("div", { class: "seg decide", role: "group", "aria-label": "Your decision" }, DECISIONS.map(([d, l]) =>
         h("button", { type: "button", class: rv.disposition === d ? "on" : "", "aria-pressed": String(rv.disposition === d), onclick: () => decide(f, d) }, l))),
@@ -882,7 +885,7 @@ VIEWS.findings = () => {
   plateHost ||= h("div", { class: !webglFailed && S.getSetting("plate3d") ? "plate3d" : "pmap" });
   after.push(mountPlate);
   const q = st.filter.toLowerCase();
-  const list = sorted(res.findings).filter(f => (!st.hideClosed || !C.CLOSED.has(st.exp.reviews[f.id]?.disposition)) &&
+  const list = sorted(res.findings).filter(f => (!st.hideClosed || !C.CLOSED.has(C.reviewOf(st.exp.reviews, f)?.disposition)) &&
     (!st.category || f.category === st.category) &&
     (!q || [f.rule, f.title, f.description, f.evidence, f.wells.join(" "), f.target, f.sample].join(" ").toLowerCase().includes(q)));
   if (!st.selFinding) { const first = sorted(res.findings).find(f => needsLook(f) && isOpen(f)) || list[0]; if (first) selectFinding(first, { render: false }); }

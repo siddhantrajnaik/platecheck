@@ -932,7 +932,7 @@ export function normalizeExperiment(exp) {
   if (isObj(exp.reviews)) for (const [id, r] of Object.entries(exp.reviews)) {
     if (!isObj(r)) continue;
     reviews[id] = { ...(DISPOSITIONS.includes(r.disposition) ? { disposition: r.disposition } : {}), ...(typeof r.note === "string" ? { note: r.note } : {}),
-      by: asStr(r.by) || "unknown", at: asStr(r.at) || now, rule: asStr(r.rule), rule_version: asStr(r.rule_version), title: asStr(r.title), description: asStr(r.description) };
+      by: asStr(r.by) || "unknown", at: asStr(r.at) || now, rule: asStr(r.rule), rule_version: asStr(r.rule_version), title: asStr(r.title), description: asStr(r.description), ...(typeof r.evidence === "string" ? { evidence: r.evidence } : {}) };
   }
   exp.reviews = reviews;
   exp.targets = cleanTargets(exp.targets); // genes and RNA types per target (web/genes.js)
@@ -977,16 +977,35 @@ export function effectiveRows(exp, parsed) {
 }
 
 // ---------------------------------------------------------------- analysis
+// The saved decision on a finding, only if it still applies: it was made on the same evidence. The description and the
+// evidence carry the values (wells, raw Ct, SD …); the evidence is compared without its "source line" numbers, so a
+// decision survives rows moving but not values changing. A decision about different values is stale: it isn't applied
+// and the flag needs a fresh look. Every reader of exp.reviews goes through reviewOf().
+export const evidenceKey = f => String(f?.evidence ?? "").replace(/source lines? \d+(?:,\s*\d+)*;?\s*/gi, "").trim();
+const differs = (r, f) => !!((r.description && f.description && r.description !== f.description) || (r.evidence && r.evidence !== evidenceKey(f)));
+export function staleReview(reviews, f) { const r = reviews?.[f.id]; return !!(r && differs(r, f)); }
+export function reviewOf(reviews, f) { return staleReview(reviews, f) ? null : reviews?.[f.id] || null; }
+// Saved runs from before stable IDs keyed per-well decisions by file line. Move each to the new ID when it was made on
+// the same evidence; a line-keyed decision about different values stays behind and is never applied.
+export function migrateReviews(reviews, findings) {
+  let moved = 0;
+  for (const f of findings) {
+    const old = f.legacyId && reviews[f.legacyId];
+    if (!old || reviews[f.id] || differs(old, f)) continue;
+    reviews[f.id] = old; delete reviews[f.legacyId]; moved++;
+  }
+  return moved;
+}
 export function summarize(findings, reviews = {}, hasData = true) {
   const real = findings.filter(f => f.severity !== "info");
-  const isOpen = f => !CLOSED.has(reviews[f.id]?.disposition);
+  const isOpen = f => !CLOSED.has(reviewOf(reviews, f)?.disposition);
   const open = real.filter(isOpen);
   // Missing method details are listed but don't make a run "Review needed": nothing is wrong with the data, it's paperwork.
   const status = !hasData ? "no_data" : open.some(f => (f.severity === "high" || f.severity === "medium") && f.rule !== "missing_metadata") ? "review_needed"
     : real.length ? "findings_present" : "no_flags";
   const count = (list, key) => Object.fromEntries([...groupBy(list, f => f[key])].map(([k, v]) => [k, v.length]));
   return { status, label: STATUS_LABEL[status] + (status === "findings_present" && !open.length ? " (all reviewed)" : ""),
-    total: real.length, open: open.length, reviewed: real.filter(f => reviews[f.id]?.disposition && reviews[f.id].disposition !== "unreviewed").length,
+    total: real.length, open: open.length, reviewed: real.filter(f => { const d = reviewOf(reviews, f)?.disposition; return d && d !== "unreviewed"; }).length,
     bySeverity: count(findings, "severity"), byCategory: count(findings, "category") };
 }
 
@@ -995,9 +1014,15 @@ export function analyze(exp) {
   const v = exp.ruleset.values;
   const res = { findings: [], notAssessed: [], checksRun: [], replicateGroups: [], bioSummary: [], controls: [], stdCurves: [],
     amp: null, melt: null, parsed: null, rows: [], ruleset: { id: rulesetId(exp.ruleset), ...exp.ruleset }, appVersion: APP_VERSION };
+  // Finding IDs say what a flag is about, so a saved decision follows it: per-well flags use the well and target, not the
+  // file line (a replaced or re-read file moves lines, and a decision on A3 must never land on H12). A number suffix keeps
+  // two flags of one rule on the same well apart. The old line-based ID is kept as legacyId to carry saved decisions over.
+  const ids = new Map();
   const add = (rule, key, o) => {
-    const r = RULES[rule];
-    res.findings.push({ id: `${rule}:${key}`, rule, rule_version: r.version, category: r.category, severity: r.severity,
+    const r = RULES[rule], legacyId = `${rule}:${key}`;
+    let id = typeof key === "number" && o?.wells?.length ? `${rule}:${o.wells.join("+")}|${o.target ?? ""}` : legacyId;
+    const n = (ids.get(id) || 0) + 1; ids.set(id, n); if (n > 1) id += `#${n}`;
+    res.findings.push({ id, ...(id !== legacyId ? { legacyId } : {}), rule, rule_version: r.version, category: r.category, severity: r.severity,
       title: r.title, why: r.why, wells: [], lines: [], target: null, sample: null, uncertain: false, ...o });
   };
   if (!exp.source) {
@@ -1372,6 +1397,7 @@ export function analyze(exp) {
   }
 
   res.findings.sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity] || wellOrder(a.wells[0]) - wellOrder(b.wells[0]) || a.id.localeCompare(b.id));
+  if (exp.reviews && res.findings.some(f => f.legacyId && exp.reviews[f.legacyId])) res.reviewsMigrated = migrateReviews(exp.reviews, res.findings);
   res.summary = summarize(res.findings, exp.reviews, true);
   return res;
 }

@@ -1,7 +1,7 @@
 // Human-readable report (FR-19) and structured exports (FR-20, FR-21). No DOM access.
 import {
   TOOL, APP_VERSION, BUILD, PARSER_VERSION, PACKET_VERSION, RULES, RULES_REVIEW, CATEGORY_LABEL, DISPOSITION_LABEL, ROLE_LABEL,
-  FORMATS, FIELD_LABEL, CONTEXT_FIELDS, RULESET_FIELDS, REFERENCES, rulesetId, rulesetChanges, referencesFor, toCsv,
+  FORMATS, FIELD_LABEL, CONTEXT_FIELDS, RULESET_FIELDS, REFERENCES, rulesetId, rulesetChanges, referencesFor, toCsv, reviewOf,
 } from "./core.js";
 import { CREDIT } from "./credit.js";
 import { analysisReportHtml, analysisResultsHtml, analysisReferences } from "./analysis.js"; // analysis module
@@ -63,7 +63,8 @@ export function reportHtml(exp, res, generatedAt = new Date().toISOString()) {
   const info = res.findings.filter(f => f.severity === "info" && f.category !== "missing_context");
   const counts = [["high", "high"], ["medium", "medium"], ["low", "low"], ["info", "informational"]].filter(([k]) => sev[k]).map(([k, l]) => `${sev[k]} ${l}`);
   const decision = f => {
-    const r = rv[f.id];
+    const r = reviewOf(rv, f);
+    if (!r && rv[f.id]) return `<p class="decision">Needs re-review: an earlier decision was made on different values, so it isn't applied here.</p>`;
     if (!r?.disposition || r.disposition === "unreviewed") return `<p class="decision">Not reviewed yet.</p>`;
     return `<p class="decision"><b>${esc(DISPOSITION_LABEL[r.disposition])}</b> by ${esc(r.by)} on ${esc(when(r.at))}.${r.note ? ` ${esc(r.note)}` : ""}</p>`;
   };
@@ -86,7 +87,7 @@ ${main.length ? main.map(finding).join("") : `<p>None.</p>`}
 ${orphan.length ? `<h3 style="margin-top:18px">Earlier decisions on findings that no longer appear</h3><p class="sub small">For example after a plate-map correction.</p><ul>${orphan.map(([, r]) => `<li>${esc(r.title || "")}: ${esc(DISPOSITION_LABEL[r.disposition])} by ${esc(r.by)} on ${esc(when(r.at))}${r.note ? `. ${esc(r.note)}` : ""}</li>`).join("")}</ul>` : ""}
 
 <h2>Method details not provided</h2>
-${missing.length ? `<ul>${missing.map(f => `<li>${esc(f.title.replace(/^Not provided: /, ""))}${f.severity === "info" ? ' <span class="sub">(optional)</span>' : ""}${rv[f.id]?.disposition && rv[f.id].disposition !== "unreviewed" ? ` <span class="sub">${esc(DISPOSITION_LABEL[rv[f.id].disposition].toLowerCase())}${rv[f.id].note ? `: ${esc(rv[f.id].note)}` : ""}</span>` : ""}</li>`).join("")}</ul>` : "<p>Everything asked for was provided.</p>"}
+${missing.length ? `<ul>${missing.map(f => `<li>${esc(f.title.replace(/^Not provided: /, ""))}${f.severity === "info" ? ' <span class="sub">(optional)</span>' : ""}${reviewOf(rv, f)?.disposition && reviewOf(rv, f).disposition !== "unreviewed" ? ` <span class="sub">${esc(DISPOSITION_LABEL[reviewOf(rv, f).disposition].toLowerCase())}${reviewOf(rv, f).note ? `: ${esc(reviewOf(rv, f).note)}` : ""}</span>` : ""}</li>`).join("")}</ul>` : "<p>Everything asked for was provided.</p>"}
 
 <h2>What was checked</h2>
 <ul>${res.checksRun.map(c => `<li>${esc(c)}</li>`).join("")}</ul>
@@ -184,7 +185,7 @@ export function wellsCsv(res) {
 }
 export function findingsCsv(exp, res) {
   return toCsv([["finding_id", "rule", "rule_version", "category", "severity", "title", "description", "wells", "source_lines", "target", "evidence", "next_check", "disposition", "note", "reviewed_by", "reviewed_at"],
-    ...res.findings.map(f => { const r = exp.reviews[f.id] || {};
+    ...res.findings.map(f => { const r = reviewOf(exp.reviews, f) || {};
       return [f.id, f.rule, f.rule_version, f.category, f.severity, f.title, f.description, f.wells.join(" "), f.lines.join(" "), f.target, f.evidence, f.next_check, r.disposition || "unreviewed", r.note, r.by, r.at]; })]);
 }
 function analysisJson(res) {
