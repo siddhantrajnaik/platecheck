@@ -1010,6 +1010,19 @@ export function summarize(findings, reviews = {}, hasData = true) {
 }
 
 const SEV_RANK = { high: 0, medium: 1, low: 2, info: 3 };
+// Reading and summarising amplification and melt curves is most of analyze()'s time on big runs (a 384-well, 4-dye run:
+// about 0.6 s), and analyze() runs after every click. The result depends only on the file text (and, for melt, the plate
+// size and value type), so the last few are kept. Files are matched by their exact text, so any change re-reads them.
+// The cached objects are only read afterwards, never changed.
+const curveCache = [];
+function cachedCurves(kind, text, extra, make) {
+  const hit = curveCache.find(e => e.kind === kind && e.extra === extra && e.text === text);
+  if (hit) return hit.value;
+  const value = make();
+  curveCache.unshift({ kind, text, extra, value });
+  curveCache.length = Math.min(curveCache.length, 4);
+  return value;
+}
 export function analyze(exp) {
   const v = exp.ruleset.values;
   const res = { findings: [], notAssessed: [], checksRun: [], replicateGroups: [], bioSummary: [], controls: [], stdCurves: [],
@@ -1270,12 +1283,16 @@ export function analyze(exp) {
   // Amplification curves (FR-11)
   if (!exp.amp) res.notAssessed.push("Amplification curves: no amplification data was provided, so curve checks were not run.");
   else {
-    const ap = parseCurves(exp.amp.text, "amp"), cs = {};
-    for (const [k, pts] of Object.entries(ap.series)) cs[k] = curveStats(pts);
-    const gmax = Math.max(0, ...Object.values(cs).map(s => s.delta));
-    for (const s of Object.values(cs)) s.rises = s.delta > 0 && s.delta > Math.max(10 * s.sd, 0.05 * gmax);
-    const T = 0.1 * (median(Object.values(cs).filter(s => s.rises).map(s => s.delta)) ?? 0);
-    for (const [k, s] of Object.entries(cs)) s.est = s.rises && T > 0 ? crossing(ap.series[k], s.mean, T) : null;
+    // The curves and their statistics depend only on the file, so they come from the cache while it's unchanged.
+    const { ap, cs, T, gmax } = cachedCurves("amp", exp.amp.text, "", () => {
+      const ap = parseCurves(exp.amp.text, "amp"), cs = {};
+      for (const [k, pts] of Object.entries(ap.series)) cs[k] = curveStats(pts);
+      const gmax = Math.max(0, ...Object.values(cs).map(s => s.delta));
+      for (const s of Object.values(cs)) s.rises = s.delta > 0 && s.delta > Math.max(10 * s.sd, 0.05 * gmax);
+      const T = 0.1 * (median(Object.values(cs).filter(s => s.rises).map(s => s.delta)) ?? 0);
+      for (const [k, s] of Object.entries(cs)) s.est = s.rises && T > 0 ? crossing(ap.series[k], s.mean, T) : null;
+      return { ap, cs, T, gmax };
+    });
     res.amp = { series: ap.series, stats: cs, threshold: T, layout: ap.layout, yName: ap.yName };
     res.checksRun.push(`Amplification curves (${Object.keys(ap.series).length} curves): rise above baseline vs reported Ct/Cq; Ct/Cq vs a common threshold crossing (tolerance ${v.ctTolerance} cycles around the plate median offset)`);
     const byWell = groupBy(Object.keys(ap.series), k => k.split("|")[0]);
@@ -1340,8 +1357,12 @@ export function analyze(exp) {
   else {
     // Numbered wells in a melt file (SDS) take their positions from the results file's plate size.
     const plate = parsed.plateSize || (rows.some(r => r.key && (r.key.charCodeAt(0) > 72 || Number(r.key.slice(1)) > 12)) ? 384 : 96);
-    const mp = parseCurves(exp.melt.text, "melt", { plateSize: plate }), isDer = exp.melt.valueType !== "fluorescence", ms = {};
-    for (const [k, pts] of Object.entries(mp.series)) ms[k] = meltStats(pts, isDer);
+    const isDer = exp.melt.valueType !== "fluorescence";
+    const { mp, ms } = cachedCurves("melt", exp.melt.text, `${plate}|${isDer}`, () => {
+      const mp = parseCurves(exp.melt.text, "melt", { plateSize: plate }), ms = {};
+      for (const [k, pts] of Object.entries(mp.series)) ms[k] = meltStats(pts, isDer);
+      return { mp, ms };
+    });
     res.melt = { stats: ms, valueType: isDer ? "derivative" : "fluorescence" };
     res.checksRun.push(`Melt curves (${isDer ? "derivative values" : "derivative computed from fluorescence"}): melt peak present, Tm within ±${v.meltTmTolerance} °C of the target median, secondary peaks ≥ ${v.meltSecondaryRatio} × main peak, NTC peaks`);
     const byWell = groupBy(Object.keys(mp.series), k => k.split("|")[0]);

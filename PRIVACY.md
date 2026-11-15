@@ -5,7 +5,7 @@ PlateCheck is a static web app. This describes the hosted GitHub Pages build and
 | Topic | Behaviour |
 |---|---|
 | Processing | All parsing and checks run in the browser tab. Files are never uploaded. There is no server-side code, account system, analytics or telemetry. |
-| Storage location | The browser's `localStorage` for this site, on this device. Keys start with `assaylint.v1.`. Each experiment stores the original imported files verbatim, the plate-map edits, context, rule set, reviews and audit history. |
+| Storage location | This site's storage in this browser, on this device. Each experiment stores the original imported files verbatim, the plate-map edits, context, rule set, reviews and audit history. The imported files (which can be several MB) are kept in the browser's IndexedDB, database `platecheck`, keyed by run ID; everything else is in `localStorage` under keys starting `assaylint.v1.`. Where IndexedDB isn't available, everything stays in `localStorage`. Clearing this site's data in the browser removes both. |
 | Encryption | PlateCheck does not encrypt stored data. Protection relies on the device account and disk encryption. Pages traffic uses HTTPS, but only the app itself is downloaded. |
 | Access | Anyone who can use this browser profile can open the data. There are no collaborator accounts; share by exporting a packet or report through a channel you trust. |
 | Retention | Data stays until you delete the experiment or clear the site's data. Browsers limit storage per site (typically about 5 MB); PlateCheck warns if a save fails. |

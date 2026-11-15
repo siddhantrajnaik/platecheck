@@ -1,5 +1,7 @@
 // Minimal canvas line/scatter plots for curves and standard curves.
-const extent = xs => [Math.min(...xs), Math.max(...xs)];
+// A loop, not Math.min(...xs): a 384-well run with curves has hundreds of thousands of points, more arguments than a
+// function call can take (it threw "Maximum call stack size exceeded" and stopped the page from drawing).
+export const extent = xs => { let lo = Infinity, hi = -Infinity; for (const x of xs) { if (x < lo) lo = x; if (x > hi) hi = x; } return [lo, hi]; };
 // Round tick values (1, 2, 2.5 or 5 × 10^n), as a person would label an axis.
 function ticks(lo, hi, n = 5) {
   const raw = (hi - lo) / n, mag = 10 ** Math.floor(Math.log10(raw)), step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= raw);

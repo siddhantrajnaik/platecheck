@@ -55,6 +55,10 @@ function change(action, detail, fn, { rerender = true } = {}) {
 }
 function openExp(id) {
   const e = S.load(id);
+  if (!e && S.filesUnavailable(id)) { // its files are in IndexedDB, which this browser session can't read: keep the run
+    flash("That run's files are kept in this browser's file storage (IndexedDB), which can't be read right now (for example in a private window). The run was kept; try again in a normal window.", true);
+    st.exp = null; st.res = null; return render();
+  }
   if (!e) { // the saved copy is missing or damaged: drop it from the list rather than leave a dead entry
     try { S.remove(id); } catch { /* storage unavailable */ }
     flash("That run couldn't be opened because its saved copy is missing or damaged, so I removed it from the list.", true);
@@ -81,7 +85,9 @@ function download(name, text, type) {
   const a = h("a", { href: url, download: name }); document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
-addEventListener("beforeunload", e => { if (st.saveError) e.preventDefault(); });
+addEventListener("beforeunload", e => { if (st.saveError || S.hasPendingWrites()) e.preventDefault(); });
+// A background write of a file to IndexedDB failed (storage full, private mode …): say so, as for a failed save.
+S.setErrorHandler(() => { st.saveError = "Could not save this run's files to the browser's storage (it may be full or disabled). Export the experiment packet to keep your work."; render(); });
 
 // ---------------------------------------------------------------- shell
 function render() { renderSidebar(); renderMain(); }
@@ -1013,6 +1019,15 @@ VIEWS.compare = () => {
 VIEWS.assay = () => assayView({ h, st, card, emptyCard, change, renderMain, flash, plateGrid, plateDims, download }); // download: CSV / SVG / PNG of the replicate comparison (workstream 4)
 
 // ---------------------------------------------------------------- start
+window.__plateCheckStarted = true; // the code loaded; read by the "browser too old" check in index.html
+await S.init(); // reads the run files kept in IndexedDB into memory, and moves older runs' files there (store.js)
 const first = S.index()[0];
-if (first) openExp(first.id); else render();
-window.__plateCheckStarted = true; // read by the "browser too old" check in index.html
+// The last run reopens on start. If drawing it fails, show the home page instead: otherwise every reload would fail the
+// same way and the user couldn't reach anything.
+try { if (first) openExp(first.id); else render(); }
+catch (err) {
+  console.error(err);
+  Object.assign(st, { exp: null, res: null });
+  render();
+  flash(`Couldn't open “${first?.title || "the last run"}” (${err?.message || err}). It is still saved; open it from the list, or export it from there and report the problem.`, true);
+}

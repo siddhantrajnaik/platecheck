@@ -13,11 +13,81 @@ export function index() {
     .map(e => ({ id: e.id, title: typeof e.title === "string" && e.title ? e.title : "Untitled run", date: typeof e.date === "string" ? e.date : "",
       updated: typeof e.updated === "string" ? e.updated : "", status: typeof e.status === "string" ? e.status : "no_data", label: typeof e.label === "string" ? e.label : "" }));
 }
+// ---- File texts in IndexedDB
+// The imported files (results, amplification, melt) are most of a run: a 384-well, 4-dye run with curves is about 6 MB
+// of text, while localStorage holds about 5 MB per site. So the texts live in IndexedDB under "<run id>:<file>", and
+// the rest of each run stays in localStorage. init() reads the stored texts into memory once at start-up, so load() and
+// save() stay synchronous for the rest of the app; save() writes a text to IndexedDB only when it changed (a click no
+// longer rewrites megabytes). Without IndexedDB (some private modes, tests) everything stays in localStorage, as before.
+const FILES = ["source", "amp", "melt"];
+const texts = new Map(), pending = new Set();
+let db = null, dbFailed = false, onError = null;
+const tkey = (id, k) => `${id}:${k}`;
+const idb = (mode, fn) => new Promise((resolve, reject) => {
+  const tx = db.transaction("texts", mode), req = fn(tx.objectStore("texts"));
+  tx.oncomplete = () => resolve(req?.result); tx.onerror = tx.onabort = () => reject(tx.error || new Error("IndexedDB transaction failed"));
+});
+function queue(key, text) {
+  const p = idb("readwrite", s => (text === undefined ? s.delete(key) : s.put(text, key)))
+    .catch(err => onError?.(err)).finally(() => pending.delete(p));
+  pending.add(p);
+}
+export const setErrorHandler = f => { onError = f; };
+export const hasPendingWrites = () => pending.size > 0;
+export const flush = () => Promise.all([...pending]);
+export const usingIndexedDb = () => !!db;
+export async function init() {
+  if (db || !globalThis.indexedDB) return { indexedDb: !!db, moved: 0 };
+  try {
+    db = await new Promise((resolve, reject) => {
+      const r = indexedDB.open("platecheck", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("texts");
+      r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); r.onblocked = () => reject(new Error("blocked"));
+    });
+    const [keys, vals] = await Promise.all([idb("readonly", s => s.getAllKeys()), idb("readonly", s => s.getAll())]);
+    keys.forEach((k, i) => texts.set(k, vals[i]));
+  } catch { db = null; dbFailed = true; return { indexedDb: false, moved: 0 }; }
+  // Runs saved before this keep their files in localStorage: move them over, which frees localStorage.
+  let moved = 0;
+  for (const { id } of index()) {
+    const e = read("exp." + id, null);
+    if (e && FILES.some(k => typeof e[k]?.text === "string")) { try { writeRun(e); moved++; } catch { /* left as it was */ } }
+  }
+  await flush();
+  return { indexedDb: true, moved };
+}
+// The run without its file texts goes to localStorage; changed texts are queued for IndexedDB.
+function writeRun(exp) {
+  if (!db) return write("exp." + exp.id, exp);
+  const meta = { ...exp };
+  for (const k of FILES) {
+    const key = tkey(exp.id, k);
+    if (typeof exp[k]?.text === "string") {
+      if (texts.get(key) !== exp[k].text) { texts.set(key, exp[k].text); queue(key, exp[k].text); }
+      meta[k] = { ...exp[k], text: undefined, textInDb: true };
+    } else if (texts.has(key)) { texts.delete(key); queue(key, undefined); }
+  }
+  write("exp." + exp.id, meta);
+}
+// True when a run's files are in IndexedDB but couldn't be read this time; the run must not be treated as damaged.
+export function filesUnavailable(id) {
+  const e = read("exp." + id, null);
+  return !!(e && FILES.some(k => e[k]?.textInDb && typeof texts.get(tkey(id, k)) !== "string"));
+}
 export function load(id) {
-  try { const e = read("exp." + id, null); return e ? normalizeExperiment(e) : null; } catch { return null; }
+  try {
+    const e = read("exp." + id, null);
+    if (!e) return null;
+    for (const k of FILES) if (e[k]?.textInDb) {
+      const t = texts.get(tkey(id, k));
+      if (typeof t !== "string") return null;
+      e[k] = { ...e[k], text: t }; delete e[k].textInDb;
+    }
+    return normalizeExperiment(e);
+  } catch { return null; }
 }
 export function save(exp, summary) {
-  write("exp." + exp.id, exp);
+  writeRun(exp);
   const idx = index().filter(e => e.id !== exp.id);
   idx.unshift({ id: exp.id, title: exp.title, date: exp.date, updated: exp.updated, status: summary?.status || "no_data", label: summary?.label || "No data imported" });
   write("index", idx);
@@ -25,7 +95,9 @@ export function save(exp, summary) {
 export function remove(id) {
   ls().removeItem(P + "exp." + id);
   write("index", index().filter(e => e.id !== id));
+  if (db) for (const k of FILES) { const key = tkey(id, k); if (texts.has(key)) { texts.delete(key); queue(key, undefined); } }
 }
+export const indexedDbFailed = () => dbFailed;
 export function profiles() {
   const v = read("profiles", []);
   return (Array.isArray(v) ? v : []).filter(p => p && typeof p.id === "string" && typeof p.name === "string" && Array.isArray(p.versions) && p.versions.length
@@ -69,5 +141,6 @@ export function removeStudy(id) {
 export function usageBytes() {
   let n = 0;
   for (let i = 0; i < ls().length; i++) { const k = ls().key(i); if (k.startsWith(P)) n += k.length + (ls().getItem(k)?.length || 0); }
+  for (const t of texts.values()) n += t.length; // file texts in IndexedDB
   return n * 2;
 }
