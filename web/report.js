@@ -22,6 +22,28 @@ export const LIMITATIONS = [
   "No wells or values were removed or changed. Plate-map edits only change labels, and the original values are listed above.",
 ];
 
+// "Method details not provided" items, with repeats of one title folded into one line (a plate whose Task column
+// isn't recognised gives one finding per well). Shared by the HTML and PDF reports.
+// [{ title, optional, n, wells, decided: "accepted" | "3 of 5 decided" | "" }]
+export function missingGroups(findings, reviews) {
+  const by = new Map();
+  for (const f of findings) {
+    const t = f.title.replace(/^Not provided: /, "");
+    if (!by.has(t)) by.set(t, { title: t, optional: f.severity === "info", n: 0, wells: [], done: [] });
+    const g = by.get(t), r = reviewOf(reviews, f);
+    g.n++; g.wells.push(...(f.wells || []));
+    if (r?.disposition && r.disposition !== "unreviewed") g.done.push(r);
+  }
+  return [...by.values()].map(g => {
+    const one = g.done.length === 1 && g.n === 1 ? g.done[0] : null;
+    const decided = one ? `${DISPOSITION_LABEL[one.disposition].toLowerCase()}${one.note ? `: ${one.note}` : ""}`
+      : g.done.length ? `${g.done.length} of ${g.n} decided` : "";
+    const w = [...new Set(g.wells)];
+    return { title: g.title, optional: g.optional, n: g.n, wells: w, decided,
+      count: g.n > 1 ? (w.length ? `${w.length} wells: ${w.slice(0, 6).join(", ")}${w.length > 6 ? `, … (${w.length - 6} more)` : ""}` : `${g.n} times`) : "" };
+  });
+}
+
 // Absolute quantity of the unknowns (web/absquant.js), as in the app's Review page.
 function absQuantHtml(res) {
   const q = Q.quantify(res.rows, res.stdCurves);
@@ -97,7 +119,7 @@ ${main.length ? main.map(finding).join("") : `<p>None.</p>`}
 ${orphan.length ? `<h3 style="margin-top:18px">Earlier decisions on findings that no longer appear</h3><p class="sub small">For example after a plate-map correction.</p><ul>${orphan.map(([, r]) => `<li>${esc(r.title || "")}: ${esc(DISPOSITION_LABEL[r.disposition])} by ${esc(r.by)} on ${esc(when(r.at))}${r.note ? `. ${esc(r.note)}` : ""}</li>`).join("")}</ul>` : ""}
 
 <h2>Method details not provided</h2>
-${missing.length ? `<ul>${missing.map(f => `<li>${esc(f.title.replace(/^Not provided: /, ""))}${f.severity === "info" ? ' <span class="sub">(optional)</span>' : ""}${reviewOf(rv, f)?.disposition && reviewOf(rv, f).disposition !== "unreviewed" ? ` <span class="sub">${esc(DISPOSITION_LABEL[reviewOf(rv, f).disposition].toLowerCase())}${reviewOf(rv, f).note ? `: ${esc(reviewOf(rv, f).note)}` : ""}</span>` : ""}</li>`).join("")}</ul>` : "<p>Everything asked for was provided.</p>"}
+${missing.length ? `<ul>${missingGroups(missing, rv).map(g => `<li>${esc(g.title)}${g.optional ? ' <span class="sub">(optional)</span>' : ""}${g.count ? ` <span class="sub">(${esc(g.count)})</span>` : ""}${g.decided ? ` <span class="sub">${esc(g.decided)}</span>` : ""}</li>`).join("")}</ul>` : p ? "<p>Everything asked for was provided.</p>" : "<p>No results file was imported, so nothing could be checked.</p>"}
 
 <h2>What was checked</h2>
 <ul>${res.checksRun.map(c => `<li>${esc(c)}</li>`).join("")}</ul>

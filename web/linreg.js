@@ -167,6 +167,8 @@ export function linRegPCR(curves, { effRange = 0.05 } = {}) {
   if (nanmin(raw.map(nanmin)) < 0) {
     warnings.push("Some fluorescence values are negative: these look like baseline-corrected data. LinRegPCR needs raw fluorescence; with baseline-subtracted data the efficiencies are wrong unless the subtracted baseline was a constant.");
     raw.forEach((a, r) => { const mn = nanmin(a); if (mn < 0) { negShift[r] = (nanmax(a) - mn) / 100 - mn; for (let i = 0; i < n; i++) a[i] += negShift[r]; } });
+  } else if (raw.filter(a => nanmin(a) === 0 && nanmax(a) > 0).length >= R / 2) {
+    warnings.push("Most curves have a minimum of exactly 0: these look like baseline-subtracted data cut off at zero. LinRegPCR needs raw fluorescence; on subtracted data the efficiencies come out wrong.");
   }
   const B = () => new Array(R).fill(false);
   const noAmp = B(), baseErr = B(), instable = B(), noPlat = B(), noisy = B(), skip = B(), short = B(), shifting = B(), usedWoL = B(), outlier = B(), lowCqEff = B(), lowCqN0 = B();
@@ -459,12 +461,14 @@ const CHEM = [[/hydrolysis|taqman|5'?.?nuclease/i, "hydrolysis probe"], [/revers
   [/saturating|sybr|eva ?green|lc ?green|syto|resolight|binding dye/i, null]];
 const chemOf = s => { for (const [re, c] of CHEM) if (re.test(s || "")) return c ?? (/^saturating/i.test(s) ? "saturating DNA binding dye" : "non-saturating DNA binding dye"); return undefined; };
 export function curvesFrom(res, { chemistry = {} } = {}) {
-  const series = res?.amp?.series;
+  const series = res?.amp?.rawSeries || res?.amp?.series; // Rn when the file also has it, not ΔRn
   if (!series) return [];
   const byKey = new Map();
-  for (const r of res.rows || []) if (r.key) byKey.set(`${r.key}|${r.target ?? ""}`, r);
+  // core.analyze links each row to its curve (r.ampKey), also when the curve file has no target column (CFX wide,
+  // LightCycler): then the curve key is "A1|" and the target comes from the results row.
+  for (const r of res.rows || []) if (r.key) { const k = r.ampKey || `${r.key}|${r.target ?? ""}`; if (!byKey.has(k)) byKey.set(k, r); }
   return Object.entries(series).map(([k, pts]) => {
-    const [well, ...t] = k.split("|"), target = t.join("|"), row = byKey.get(k) || byKey.get(`${well}|`);
+    const [well, ...t] = k.split("|"), row = byKey.get(k) || byKey.get(`${well}|`), target = row?.target ?? t.join("|");
     const fluor = [];
     for (const [x, y] of pts) { const i = Math.ceil(x) - 1; if (i >= 0 && i < 1000) fluor[i] = y; }
     for (let i = 0; i < fluor.length; i++) if (fluor[i] === undefined) fluor[i] = NaN;
@@ -482,7 +486,9 @@ export function forRun(res) {
   let out = null;
   try { out = curves.length ? linRegPCR(curves) : null; } catch { out = null; }
   if (out) {
-    if (/delta|δ|Δ|norm|baseline/i.test(res.amp.yName || "") && !out.warnings.length) out.warnings.push(`The curve values are “${res.amp.yName}”, which is usually baseline-subtracted. LinRegPCR sets its own baseline and needs raw fluorescence (Rn or RFU before baseline correction); on subtracted data the efficiencies come out wrong. Export the raw (multicomponent or “Rn”) values if your software allows.`);
+    const used = res.amp.rawName || res.amp.yName || "";
+    if (res.amp.rawName) out.notes = [`Used the “${res.amp.rawName}” column (raw) rather than “${res.amp.yName}”, which is baseline-subtracted.`];
+    if (/delta|δ|Δ|norm|baseline/i.test(used) && !out.warnings.length) out.warnings.push(`The curve values are “${used}”, which is usually baseline-subtracted. LinRegPCR sets its own baseline and needs raw fluorescence (Rn or RFU before baseline correction); on subtracted data the efficiencies come out wrong. Export the raw (multicomponent or “Rn”) values if your software allows.`);
     const ct = new Map((res.rows || []).map(r => [`${r.key}|${r.target ?? ""}`, r]));
     for (const w of out.rows) { const r = ct.get(`${w.key}|${w.target}`); w.sample = r?.sample ?? ""; w.instrumentCt = r ? (Number.isFinite(+r.ct) && String(r.ct).trim() !== "" ? +r.ct : null) : null; }
   }

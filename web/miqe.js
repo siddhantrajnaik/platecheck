@@ -59,16 +59,17 @@ function suggestions(exp, res, a) {
   if (!res?.rows?.length) return S;
   // 5.1 raw data
   const curves = [exp.amp && `amplification curves (${exp.amp.name})`, exp.melt && `melt curves (${exp.melt.name})`].filter(Boolean);
-  put("5.1", curves.length ? `The run's ${list(curves)} are kept with the PlateCheck run and its packet export; RDML export is not available in PlateCheck yet.` : "No raw fluorescence was imported into PlateCheck; only Cq values.", "");
+  put("5.1", curves.length ? `The run's ${list(curves)} are kept with the PlateCheck run and its packet export, and can be shared as RDML (Report → Other formats).` : "No raw fluorescence was imported into PlateCheck; only Cq values.", "");
   // 5.2 / 5.8 / 5.14 standard curves
   const d = (res.stdCurves || []).map(c => Q.curveDetails(c)).filter(Boolean);
   if (d.length) {
     put("5.2", d.map(x => `${x.target}: ${x.n}-well standard curve over ${x.levels} levels`).join("; ") + ". Identity of the standards (synthetic, plasmid, gDNA …) and how they were quantified: add here.", "");
     put("5.8", d.map(x => `${x.target}: ${fmt(x.efficiency, 1)}% (95% CI ${fmt(x.effLow, 1)}–${fmt(x.effHigh, 1)}%), slope ${fmt(x.slope, 3)}, R² ${fmt(x.r2, 4)}`).join("; ") + ". From a standard curve of log10 quantity vs Cq on the plate (E = 10^(−1/slope) − 1).");
-    put("5.14", d.map(x => `${x.target}: ${Q.fmtQ(10 ** x.minX)} to ${Q.fmtQ(10 ** x.maxX)} (${fmt(x.maxX - x.minX, 1)} log10 units, the standards' range)`).join("; ") + ".");
+    put("5.14", "Not determined by PlateCheck. For reference, the standards span " + d.map(x => `${x.target}: ${Q.fmtQ(10 ** x.minX)} to ${Q.fmtQ(10 ** x.maxX)} (${fmt(x.maxX - x.minX, 1)} log10 units)`).join("; ") + ". That is the range tested, not a limit of detection or quantification; give those from replicate dilutions near the bottom of the range.", "");
   } else put("5.8", a?.settings?.efficiency ? "" : "No standard curve in this run; efficiency assumed 100% (2 per cycle). Add your validation data here.", "");
   // 5.4 software
-  put("5.4", `Cq values from the instrument software${instr ? ` (${instr})` : ""}; checks and analysis in PlateCheck ${APP_VERSION} (build ${BUILD}, parser ${PARSER_VERSION}), https://siddhantrajnaik.github.io/platecheck/.`);
+  const sw = /software|version|\bv(er)?\.?\s?\d|\d+\.\d+/i.test(instr || "");
+  put("5.4", `Cq values from the instrument software${sw ? ` (${instr})` : ": name and version not recorded, add them here"}; checks and analysis in PlateCheck ${APP_VERSION} (build ${BUILD}, parser ${PARSER_VERSION}), https://siddhantrajnaik.github.io/platecheck/.`, sw ? "yes" : "");
   // 5.5 / 5.6 / 3.5 controls
   const ctr = res.controls || [], present = ctr.filter(c => c.wells.length);
   if (present.length) put("5.5", [...new Set(present.map(c => c.label))].map(l => { const cs = present.filter(c => c.label === l); return `${l}: ${cs.reduce((n, c) => n + c.wells.length, 0)} wells for ${cs.map(c => c.target).join(", ")}`; }).join("; ") + ".");
@@ -80,14 +81,15 @@ function suggestions(exp, res, a) {
   const reps = (res.replicateGroups || []).filter(g => g.role === "sample");
   if (reps.length) {
     const units = new Set(reps.map(g => g.unit)), groups = new Set(reps.map(g => g.group || "")), ks = reps.map(g => g.n);
-    put("5.10", `${units.size} biological unit(s)${groups.size > 1 || [...groups][0] ? ` in ${groups.size} group(s)` : ""}; ${Math.min(...ks) === Math.max(...ks) ? ks[0] : `${Math.min(...ks)}–${Math.max(...ks)}`} technical replicate well(s) per unit and target. Statistics use biological units as n.`);
+    const guessed = (res.findings || []).some(f => f.rule === "replicate_structure_inferred");
+    put("5.10", `${units.size} biological unit(s)${groups.size > 1 || [...groups][0] ? ` in ${groups.size} group(s)` : ""}; ${Math.min(...ks) === Math.max(...ks) ? ks[0] : `${Math.min(...ks)}–${Math.max(...ks)}`} technical replicate well(s) per unit and target in this file. Statistics use biological units as n.` + (guessed ? " The biological units were taken from the sample names because the file doesn't label them; confirm the design here." : ""), guessed ? "" : "yes");
     const sds = reps.filter(g => g.sd != null);
     if (sds.length) put("5.11", `Technical replicate SD of Cq: median ${fmt(median(sds.map(g => g.sd)), 3)}, largest ${fmt(Math.max(...sds.map(g => g.sd)), 3)} cycles over ${sds.length} replicate sets; ${sds.filter(g => g.over).length} above PlateCheck's limit (${exp.ruleset?.values?.sdThreshold ?? 0.3} cycles).`);
   }
   // 5.9 / 5.15 / 5.16 / 5.17 / 5.18 analysis
   const quant = d.length && Q.quantify(res.rows, res.stdCurves).units.length ? "Absolute quantities of unknowns read off the standard curves at the mean Cq, with 95% prediction intervals. " : "";
   if (a?.ok !== false && a?.settings?.on) {
-    put("5.9", quant + (a.settings.efficiency ? "Relative quantities efficiency-corrected with each target's standard-curve efficiency (Pfaffl 2001)." : "Relative quantities by 2^−ΔΔCq assuming 100% efficiency (Livak & Schmittgen 2001); MIQE 2.0 asks for efficiency-corrected quantities, so state the efficiencies or switch on efficiency correction."), a.settings.efficiency || quant ? "yes" : "");
+    put("5.9", quant + (a.settings.efficiency ? (a.settings.effSource === "linreg" ? "Relative quantities efficiency-corrected (Pfaffl 2001) with each target's mean efficiency from its amplification curves (LinRegPCR; Ruijter et al. 2009)." : "Relative quantities efficiency-corrected with each target's standard-curve efficiency (Pfaffl 2001).") : "Relative quantities by 2^−ΔΔCq assuming 100% efficiency (Livak & Schmittgen 2001); MIQE 2.0 asks for efficiency-corrected quantities, so state the efficiencies or switch on efficiency correction."), a.settings.efficiency || quant ? "yes" : "");
     const stab = RG.forRun(res, a.settings).r, stabText = RG.summaryText(stab);
     if (stabText) put("5.15", stabText + (a.refStability?.length ? " References were also checked for a shift between groups (Analysis step)." : ""));
     else if (a.refStability?.length) put("5.15", a.refStability.map(r => `${r.target}: Cq differs between groups by ${fmt(r.range, 2)} cycles${r.p != null ? ` (${r.test}, p = ${r.p < 0.001 ? r.p.toExponential(1) : fmt(r.p, 3)})` : ""}${r.flagged ? ", flagged" : ""}`).join("; ") + ". PlateCheck checks that references don't shift between groups; stability ranking (geNorm / NormFinder) is not done.", "");

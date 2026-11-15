@@ -436,7 +436,10 @@ export function wellOrder(k) {
   return key ? (key.charCodeAt(0) - 65) * 100 + Number(key.slice(1)) : 1e6;
 }
 const NO_AMP = new Set(["", "undetermined", "nan", "n/a", "na", "no ct", "no cq", "-", "none", "no amp"]);
-export const isNoAmp = ct => ct == null || NO_AMP.has(String(ct).trim().toLowerCase());
+// A Ct of 0 or below is no Ct: instruments write 0 (and RDML -1) for no amplification. Read as a number it would
+// wreck a standard curve and give unknowns absurd quantities.
+const notPositive = ct => { const t = String(ct).trim().replace(/^(-?\d+),(\d+)$/, "$1.$2"), n = Number(t); return t !== "" && Number.isFinite(n) && n <= 0; };
+export const isNoAmp = ct => ct == null || NO_AMP.has(String(ct).trim().toLowerCase()) || notPositive(ct);
 // Parses a numeric string. dc = the file uses decimal commas (semicolon-separated exports from some locales).
 export function toNum(v, dc = false) {
   if (v == null) return null;
@@ -669,7 +672,7 @@ export function parseResults(input, opts = {}) {
 }
 
 // ---------------------------------------------------------------- curve parser (FR-11, FR-12)
-const X_ALIASES = { amp: ["cycle", "cycle number", "cycles", "cycle #"], melt: ["temperature", "temp", "temperature (°c)", "temp (°c)", "temperature (c)"] };
+const X_ALIASES = { amp: ["cycle", "cycle number", "cycles", "cycle #", "cycle#"], melt: ["temperature", "temp", "temperature (°c)", "temp (°c)", "temperature (c)"] };
 const Y_ALIASES = {
   amp: ["delta rn", "δrn", "deltarn", "rfu", "fluorescence", "rn", "value"],
   melt: ["derivative", "-df/dt", "-d(rfu)/dt", "-rn'", "derivative reporter", "fluorescence", "rfu", "value"],
@@ -719,21 +722,27 @@ export function parseCurves(input, kind, opts = {}) {
   const find = list => { for (const a of list) { const i = norm.indexOf(a); if (i >= 0) return i; } return -1; };
   const xi = find(X_ALIASES[kind]);
   if (xi < 0) throw new ParseError(`No ${kind === "amp" ? "cycle" : "temperature"} column was found.`, { headers: hdr.filter(Boolean) });
-  const wi = find(FIELD_ALIASES.well), ti = find(FIELD_ALIASES.target);
-  const series = {}; let malformed = 0, layout, yName;
+  const wi = find([...FIELD_ALIASES.well, "samplepos"]), ti = find(FIELD_ALIASES.target);
+  const series = {}, rawSeries = {}; let malformed = 0, layout, yName, rawName = null;
   const add = (k, x, y) => {
     const X = toNum(x, dc), Y = toNum(y, dc);
     if (X === null || Y === null) { malformed++; return; }
     (series[k] ||= []).push([X, Y]);
   };
   if (wi >= 0) {
-    const yi = find(Y_ALIASES[kind]);
+    let yi = find(Y_ALIASES[kind]);
+    if (yi < 0 && kind === "amp") yi = norm.findIndex(h => /^\d{3}-\d{3}$/.test(h)); // LightCycler raw data: one column per channel, "465-510"
     if (yi < 0) throw new ParseError("No fluorescence or derivative value column was found.", { headers: hdr.filter(Boolean) });
     layout = "long"; yName = hdr[yi];
+    // QuantStudio/SDS exports can carry both ΔRn (used for PlateCheck's curve checks) and Rn; LinRegPCR needs the raw Rn.
+    const ri = kind === "amp" && /^(delta ?rn|δrn|deltarn)$/.test(norm[yi]) ? norm.indexOf("rn") : -1;
+    if (ri >= 0) rawName = hdr[ri];
     for (const r of rows.slice(1)) {
       const key = wellKey(r.cells[wi]);
       if (!key) { malformed++; continue; }
-      add(`${key}|${ti >= 0 ? (r.cells[ti] || "").trim() : ""}`, r.cells[xi], r.cells[yi]);
+      const k = `${key}|${ti >= 0 ? (r.cells[ti] || "").trim() : ""}`;
+      add(k, r.cells[xi], r.cells[yi]);
+      if (ri >= 0) { const X = toNum(r.cells[xi], dc), Y = toNum(r.cells[ri], dc); if (X !== null && Y !== null) (rawSeries[k] ||= []).push([X, Y]); }
     }
   } else {
     const wellCols = hdr.map((h, i) => [wellKey(h), i]).filter(([k]) => k);
@@ -741,7 +750,7 @@ export function parseCurves(input, kind, opts = {}) {
     layout = "wide"; yName = "value";
     for (const r of rows.slice(1)) for (const [k, i] of wellCols) add(`${k}|`, r.cells[xi], r.cells[i]);
   }
-  for (const s of Object.values(series)) s.sort((a, b) => a[0] - b[0]);
+  for (const s of [...Object.values(series), ...Object.values(rawSeries)]) s.sort((a, b) => a[0] - b[0]);
   if (!Object.keys(series).length) throw new ParseError("No numeric curve values were found.", { headers: hdr.filter(Boolean) });
   let guessedValueType = null;
   if (kind === "melt") {
@@ -752,7 +761,7 @@ export function parseCurves(input, kind, opts = {}) {
     }
   }
   const wells = [...new Set(Object.keys(series).map(k => k.split("|")[0]))].sort((a, b) => wellOrder(a) - wellOrder(b));
-  return { kind, layout, xName: hdr[xi], yName, series, wells, malformed,
+  return { kind, layout, xName: hdr[xi], yName, series, ...(rawName ? { rawSeries, rawName } : {}), wells, malformed,
     points: Object.values(series).reduce((a, s) => a + s.length, 0), guessedValueType, parserVersion: PARSER_VERSION };
 }
 
@@ -1300,7 +1309,7 @@ export function analyze(exp) {
       for (const [k, s] of Object.entries(cs)) s.est = s.rises && T > 0 ? crossing(ap.series[k], s.mean, T) : null;
       return { ap, cs, T, gmax };
     });
-    res.amp = { series: ap.series, stats: cs, threshold: T, layout: ap.layout, yName: ap.yName };
+    res.amp = { series: ap.series, stats: cs, threshold: T, layout: ap.layout, yName: ap.yName, ...(ap.rawSeries ? { rawSeries: ap.rawSeries, rawName: ap.rawName } : {}) };
     res.checksRun.push(`Amplification curves (${Object.keys(ap.series).length} curves): rise above baseline vs reported Ct/Cq; Ct/Cq vs a common threshold crossing (tolerance ${v.ctTolerance} cycles around the plate median offset)`);
     const byWell = groupBy(Object.keys(ap.series), k => k.split("|")[0]);
     const tw = groupBy(active.filter(r => r.key), r => r.key);

@@ -58,3 +58,18 @@ test("MIQE 5.15 is answered from the stability results when candidates are chose
   const res = C.analyze(e), row = M.checklist(e, res, analyzeRun(e, res)).find(x => x.id === "5.15");
   assert.equal(row.provided, "yes"); assert.match(row.text, /geNorm/); assert.match(row.text, /NormFinder/);
 });
+
+// NormFinder as its authors' R code does it, on Ma et al. 2022 (PeerJ 10:e14221) Cq data. Expected values from an
+// independent transcription of the authors' algorithm (platecheck-qa/papers/quant-refgenes-published/scripts).
+test("NormFinder: negative variances as the authors handle them, and the best pair over all candidate pairs", () => {
+  const L = readFileSync(P("peerj14221_cq.csv"), "utf8").trim().split(/\r?\n/).map(l => l.split(",")), genes = L[0].slice(1);
+  const pick = re => L.slice(1).filter(r => re.test(r[0])), lg = rows => rows.map(r => r.slice(1).map(c => -c)); // log2 quantity = -Cq
+  const one = re => { const v = G.normfinder(lg(pick(re)), pick(re).map(() => "all")).variance; return Object.fromEntries(genes.map((g, j) => [g, +Math.sqrt(v[j]).toFixed(3)])); };
+  // ICR soleus: ACTB and GAPDH get negative variance estimates; NormFinder uses the smallest pairwise variance / 4
+  assert.deepEqual(one(/^ICR_SOL/), { HPRT: 0.28, TUBA: 0.244, "18S": 1.011, PPIA: 0.654, ACTB: 0.068, GAPDH: 0.068, B2M: 0.185, YWHAZ: 0.124 });
+  assert.deepEqual(one(/^ICR_TA/), { HPRT: 0.11, TUBA: 0.315, "18S": 1.329, PPIA: 0.413, ACTB: 0.465, GAPDH: 0.212, B2M: 0.285, YWHAZ: 0.11 });
+  // four tissues as groups: clipping the negative variances to 0 (NormqPCR) made YWHAZ the best gene; NormFinder says TUBA
+  const adult = pick(/^ICR_(SOL|TA|LD|GAS)_/), nf = G.normfinder(lg(adult), adult.map(r => r[0].split("_")[1]));
+  assert.equal(genes[nf.rho.indexOf(Math.min(...nf.rho))], "TUBA"); assert.equal(+Math.min(...nf.rho).toFixed(3), 0.248);
+  assert.ok(nf.bestPair.every(j => j >= 0) && nf.bestPairRho < Math.min(...nf.rho));
+});

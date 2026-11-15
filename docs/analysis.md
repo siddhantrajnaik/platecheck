@@ -36,7 +36,7 @@ With one reference gene and group means this gives exactly Pfaffl's ratio
 
 and with several references it is the qBase normalised relative quantity on the log2 scale (Hellemans et al. 2007). With `E = 2` everywhere, `w = 1` and it reduces to plain ΔΔCt. A target without a standard curve gets 100% and a note; an efficiency outside 90–110% gets a note too. If several plates in a study have a curve for the same target, their efficiencies are averaged.
 
-**Efficiencies from the amplification curves.** With “Efficiencies from: Amplification curves, per-well LinRegPCR”, `E_t` is instead the target's mean LinRegPCR efficiency (see “Per-well efficiency” below): no dilution series needed, but the curves must be raw fluorescence. A target without a usable LinRegPCR efficiency gets 100% and a note; one outside 80–120% is not used (100% and a note), and one outside 80–110% is used with a note (per-well efficiencies of real assays often come out at 85–95%, below standard-curve estimates). In a study, the per-plate means are pooled, weighted by the number of wells.
+**Efficiencies from the amplification curves.** With “Efficiencies from: Amplification curves, per-well LinRegPCR”, `E_t` is instead the target's mean LinRegPCR efficiency (see “Per-well efficiency” below): no dilution series needed, but the curves must be raw fluorescence. A target without a usable LinRegPCR efficiency gets 100% and a note; one outside 60–120% is not used (100% and a note), and one outside 80–110% is used with a note (per-well efficiencies of real assays often come out at 85–95%, below standard-curve estimates). In a study, the per-plate means are pooled, weighted by the number of wells.
 
 ## Statistics
 
@@ -362,9 +362,11 @@ When the run has amplification curves, the Review page shows each well's PCR eff
 
 Every well is listed with its efficiency, R², Cq from LinRegPCR next to the instrument's, N0, and why it was left out of the mean, if it was; CSV download. The per-target means can feed the Pfaffl correction (above). RDML runs with raw curves but no Cq get their Cq from this on import.
 
+**Checked against published data** (platecheck-qa/papers/linreg-published): Ruijter et al. 2013's 94 × 4 dilution series, 380-replicate, competimer and Vermeulen 64-gene sets, Untergasser et al. 2021's additional files and 17 qpcR data sets agree with rdmlpython to about 1e-14 (25,266 Ruijter reactions); against the published LinRegPCR 2012 sheets the median per-well efficiency difference is 0 (SD 0.006), with the remaining differences coming from the newer LinRegPCR version's rules.
+
 **Checked against rdmlpython.** On all 14 runs of the RDML example files with curves (1,976 reactions; `platecheck-qa/papers/linreg`), every efficiency, R², baseline, Cq and N0 agrees with rdmlpython's to 1e-12 or better, and every flag (amplification, baseline error, plateau, noisy, outlier, window points) and note is identical. `tests/linreg.test.mjs` repeats this for the committed and downloaded files, and checks synthetic curves of known efficiency.
 
-**Limits.** LinRegPCR needs raw fluorescence. Baseline-subtracted data (ΔRn, negative values) are shifted and warned about, and the efficiencies are then unreliable. With fewer than 10 cycles nothing is computed. RDML 1.4 files read fine in PlateCheck; rdmlpython 1.7.2 itself reads up to RDML 1.3 (the comparison relabelled the files' version, which changes nothing LinRegPCR uses).
+**Limits.** LinRegPCR needs raw fluorescence. When a QuantStudio/SDS file has both Rn and ΔRn, LinRegPCR takes Rn (the curve checks keep using ΔRn). Baseline-subtracted data (ΔRn, negative values, or curves cut off at exactly 0) are warned about, and the efficiencies are then unreliable. Curve files without a target column (Bio-Rad wide exports, LightCycler raw data) are matched to targets, roles and samples through the results file. With fewer than 10 cycles nothing is computed. RDML 1.4 files read fine in PlateCheck; rdmlpython 1.7.2 itself reads up to RDML 1.3 (the comparison relabelled the files' version, which changes nothing LinRegPCR uses).
 
 ## In the report
 

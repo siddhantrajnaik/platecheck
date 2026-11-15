@@ -28,11 +28,14 @@ test("53 items in the five MIQE 2.0 sections", () => {
 test("items PlateCheck can see in the run are suggested; the rest are left open", () => {
   const { e, res, a } = run(), rows = M.checklist(e, res, a), by = id => rows.find(r => r.id === id);
   assert.equal(by("4.6").provided, "yes"); assert.match(by("4.6").text, /QuantStudio 5/);
-  assert.equal(by("5.4").provided, "yes"); assert.match(by("5.4").text, /PlateCheck/);
+  assert.equal(by("5.4").provided, "yes"); assert.match(by("5.4").text, /Design & Analysis 2\.6.*PlateCheck/);
+  { e.context.instrument = "QuantStudio 5"; const r2 = M.checklist(e, res, a).find(r => r.id === "5.4"); // the model alone is not the software and version
+    assert.equal(r2.provided, ""); assert.match(r2.text, /name and version not recorded/); e.context.instrument = "QuantStudio 5, Design & Analysis 2.6"; }
   assert.equal(by("5.8").provided, "yes"); assert.match(by("5.8").text, /GENE: 96\.1% \(95% CI 94\.5–97\.8%\)/);
-  assert.equal(by("5.14").provided, "yes"); assert.match(by("5.14").text, /100 to 1e\+6|100 to 1000000|100 to 1\.00e\+6/);
+  assert.equal(by("5.14").provided, ""); assert.match(by("5.14").text, /^Not determined.*(100 to 1e\+6|100 to 1000000|100 to 1\.00e\+6).*not a limit/); // the standards' range is not an LOQ
   assert.equal(by("5.6").provided, "yes"); assert.match(by("5.6").text, /1 of 1 wells amplified.*Ct 36\.2/);
-  assert.equal(by("5.10").provided, "yes"); assert.match(by("5.10").text, /4 biological unit\(s\) in 2 group\(s\); 2 technical/);
+  // no biological-unit column: units come from the sample names, so the design is suggested but left to the user to confirm
+  assert.equal(by("5.10").provided, ""); assert.match(by("5.10").text, /4 biological unit\(s\) in 2 group\(s\); 2 technical.*taken from the sample names/);
   assert.equal(by("5.16").provided, "yes"); assert.match(by("5.16").text, /ACTB/);
   assert.equal(by("5.9").provided, "yes"); assert.match(by("5.9").text, /Absolute quantities/);
   assert.equal(by("5.15").provided, ""); assert.match(by("5.15").text, /geNorm/);   // a starting point, not a Yes

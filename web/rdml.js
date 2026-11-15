@@ -55,14 +55,15 @@ export function rdmlRuns(xml) {
     const ann = Object.fromEntries(kids(s, "annotation").map(a => [txt(a, "property"), txt(a, "value")]));
     const group = Object.entries(ann).find(([p]) => GROUP_PROPS.test(p))?.[1] || "";
     const q = kid(s, "quantity");
-    samples[s.attrs.id] = { type: txt(s, "type") || "unkn", quantity: q ? txt(q, "value") : "", unit: q ? txt(q, "unit") : "", group };
+    const bio = Object.entries(ann).find(([p]) => /^biological unit$/i.test(p))?.[1] || "";
+    samples[s.attrs.id] = { type: txt(s, "type") || "unkn", quantity: q ? txt(q, "value") : "", unit: q ? txt(q, "unit") : "", group, bio };
   }
   const dyes = Object.fromEntries(kids(doc, "dye").map(d => [d.attrs.id, txt(d, "dyeChemistry")]));
   const targets = Object.fromEntries(kids(doc, "target").map(t => [t.attrs.id, { type: txt(t, "type") || "toi", eff: txt(t, "amplificationEfficiency"), chemistry: dyes[kid(t, "dyeId")?.attrs.id] || "" }]));
   const runs = [];
   for (const ex of kids(doc, "experiment")) for (const run of kids(ex, "run")) {
     const f = kid(run, "pcrFormat"), fmt = { rows: txt(f, "rows"), columns: txt(f, "columns"), rowLabel: txt(f, "rowLabel") || "ABC", columnLabel: txt(f, "columnLabel") || "123" };
-    const res = [["Well", "Sample", "Target", "Task", "Quantity", "Cq", "Group", "Omit", "Chemistry"]], amp = [["Well", "Target", "Cycle", "Fluorescence"]], melt = [["Well", "Target", "Temperature", "Fluorescence"]];
+    const res = [["Well", "Sample", "Target", "Task", "Quantity", "Cq", "Group", "Omit", "Chemistry", "Biological Unit"]], amp = [["Well", "Target", "Cycle", "Fluorescence"]], melt = [["Well", "Target", "Temperature", "Fluorescence"]];
     let withCq = 0, n = 0, opt = 0, a = 0, mm = 0;
     const curves = []; // for LinRegPCR when the run has curves but no Cq
     for (const re of kids(run, "react")) {
@@ -71,7 +72,7 @@ export function rdmlRuns(xml) {
       for (const d of kids(re, "data")) {
         const tar = kid(d, "tar")?.attrs.id ?? "", cqRaw = txt(d, "cq"), cq = cqRaw === "" || +cqRaw < 0 ? "Undetermined" : cqRaw, excl = txt(d, "excl");
         n++; if (cqRaw !== "" && +cqRaw >= 0) withCq++;
-        res.push([well, sid, tar, TYPE[s.type] || "Unknown", s.type === "std" ? s.quantity : "", cq, s.group, excl ? "TRUE" : "", targets[tar]?.chemistry || ""]);
+        res.push([well, sid, tar, TYPE[s.type] || "Unknown", s.type === "std" ? s.quantity : "", cq, s.group, excl ? "TRUE" : "", targets[tar]?.chemistry || "", s.bio || ""]);
         const fluor = [];
         for (const p of kids(d, "adp")) { amp.push([well, tar, txt(p, "cyc"), txt(p, "fluor")]); a++; const i = Math.ceil(+txt(p, "cyc")) - 1; if (i >= 0 && i < 1000) fluor[i] = +txt(p, "fluor"); }
         curves.push({ row: res.length - 1, key: well, target: tar, type: s.type, excluded: !!excl, chemistry: targets[tar]?.chemistry, fluor: Array.from(fluor, x => x ?? NaN) });
@@ -85,7 +86,7 @@ export function rdmlRuns(xml) {
       if (lr) { const by = new Map(lr.rows.map(x => [`${x.key}|${x.target}`, x]));
         for (const c of curves) { const x = by.get(`${c.key}|${c.target}`); if (x?.cq != null) { res[c.row][5] = x.cq.toFixed(3); withCq++; } } }
     }
-    if (lr) w.push(`This run had amplification curves but no Cq values, so PlateCheck worked out Cq from the raw curves with LinRegPCR (per-well baseline, one common threshold of ${+lr.threshold.toPrecision(4)}, each target's mean efficiency; Ruijter et al. 2009). ${withCq} of ${n} reactions got a Cq; the rest did not amplify. The per-well efficiencies are on the Review step.`);
+    if (lr) w.push(`This run had amplification curves but no Cq values, so PlateCheck worked out Cq from the raw curves with LinRegPCR (per-well baseline, one common threshold of ${+lr.threshold.toPrecision(4)}, each target's mean efficiency; Ruijter et al. 2009). ${withCq} of ${n} reactions got a Cq${withCq < n ? "; the rest did not amplify" : ""}. The per-well efficiencies are on the Review step.`);
     else if (!withCq && n) w.push(`This run has ${a ? "amplification curves but " : ""}no Cq values, and PlateCheck's checks start from Cq values. Export the run with Cq values from your instrument software or from RDML-Tools (LinRegPCR), then load that file.`);
     else if (withCq < n) w.push(`${n - withCq} of ${n} reactions have no Cq in the RDML file (missing or −1); they are read as Undetermined.`);
     if (opt) w.push(`${opt} optical calibrator reaction(s) (sample type "opt") were left out.`);
@@ -94,6 +95,7 @@ export function rdmlRuns(xml) {
       results: plainCsv(res), amp: a ? plainCsv(amp) : null, melt: mm ? plainCsv(melt) : null, rows: +fmt.rows || 8, columns: +fmt.columns || 12 });
   }
   if (!runs.length) throw new Error("The RDML file has no experiment runs.");
+  if (runs.every(r => !r.reactions)) throw new Error("The RDML file has no reactions (no <react> with <data>), so there is nothing to check.");
   return { version: doc.attrs.version || "", runs };
 }
 
@@ -127,14 +129,15 @@ const xmlEsc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<
 const ROLE_TYPE = { sample: "unkn", ntc: "ntc", nrt: "nrt", positive: "pos", standard: "std" };
 const idOk = s => String(s ?? "").trim() || "unnamed";
 export function rdmlXml(exp, res, { now = new Date().toISOString().slice(0, 19) } = {}) {
-  const rows = (res?.rows || []).filter(r => r.key && r.role !== "empty" && r.target);
+  const rows = (res?.rows || []).filter(r => r.key && r.role !== "empty");
   const big = rows.some(r => r.key.charCodeAt(0) > 72 || Number(r.key.slice(1)) > 12), R = big ? 16 : 8, Cn = big ? 24 : 12;
   const refs = new Set(exp.analysis?.refs || []);
   const samples = new Map(), targets = new Map();
+  const { sidOf, tidOf } = rdmlIds(rows);
   for (const r of rows) {
-    const sid = idOk(r.sample || r.bio_unit || r.key);
+    const sid = sidOf(r);
     if (!samples.has(sid)) samples.set(sid, { type: ROLE_TYPE[r.role] || "unkn", quantity: r.role === "standard" ? r.quantity : null, group: r.group || "", unit: r.bio_unit || "" });
-    if (!targets.has(r.target)) targets.set(r.target, refs.has(r.target) ? "ref" : "toi");
+    if (!targets.has(tidOf(r))) targets.set(tidOf(r), refs.has(r.target) ? "ref" : "toi");
   }
   const eff = Object.fromEntries((res.stdCurves || []).filter(c => Number.isFinite(c.efficiency)).map(c => [c.target, 1 + c.efficiency / 100]));
   const amp = res.amp?.series || {}, melt = meltSeries(exp, Cn === 24 ? 384 : 96);
@@ -150,19 +153,37 @@ export function rdmlXml(exp, res, { now = new Date().toISOString().slice(0, 19) 
     `<run id="${xmlEsc(idOk(exp.source?.name || exp.id))}">` + (exp.context?.instrument ? `<instrument>${xmlEsc(exp.context.instrument)}</instrument>` : "") +
     `<pcrFormat><rows>${R}</rows><columns>${Cn}</columns><rowLabel>ABC</rowLabel><columnLabel>123</columnLabel></pcrFormat>` + (exp.date ? `<runDate>${xmlEsc(exp.date)}T00:00:00</runDate>` : ""));
   for (const k of [...byWell.keys()].sort((a, b) => pos(a) - pos(b))) {
-    const rs = byWell.get(k), sid = idOk(rs[0].sample || rs[0].bio_unit || k);
+    const rs = byWell.get(k), sid = sidOf(rs[0]);
     L.push(`<react id="${pos(k)}"><sample id="${xmlEsc(sid)}"/>`);
     // RDML allows one result per target in a well: a second one (a duplicated well) isn't written; rdmlNotes says so.
-    for (const r of rs.filter((x, i) => rs.findIndex(y => y.target === x.target) === i)) {
+    for (const r of rs.filter((x, i) => rs.findIndex(y => tidOf(y) === tidOf(x)) === i)) {
       const c = ctNum(r.ct, r.dc), a = amp[`${k}|${r.target}`] || (Object.keys(amp).filter(x => x.startsWith(k + "|")).length === 1 && rs.length === 1 ? amp[Object.keys(amp).find(x => x.startsWith(k + "|"))] : null);
       const mm = melt[`${k}|${r.target}`] || melt[`${k}|`] || null;
-      L.push(`<data><tar id="${xmlEsc(r.target)}"/>` + (c !== null ? `<cq>${c}</cq>` : "") + (r.omit ? `<excl>excluded in the instrument export</excl>` : "") +
+      L.push(`<data><tar id="${xmlEsc(tidOf(r))}"/>` + (c !== null ? `<cq>${c}</cq>` : "") + (r.omit ? `<excl>excluded in the instrument export</excl>` : "") +
         (a ? a.map(([x, y]) => `<adp><cyc>${x}</cyc><fluor>${y}</fluor></adp>`).join("") : "") + (mm ? mm.map(([x, y]) => `<mdp><tmp>${x}</tmp><fluor>${y}</fluor></mdp>`).join("") : "") + `</data>`);
     }
     L.push(`</react>`);
   }
   L.push(`</run></experiment></rdml>`);
   return L.join("\n");
+}
+// RDML keeps type, group, biological unit and quantity per sample, not per well. Wells that share a name but differ in
+// any of these (a "No RT" and an "RT" well both called "S1"; standards all called "Std") become separate RDML samples,
+// "S1 #2" (a neutral suffix: words such as "No RT" in a name would make it read as a control); rdmlNotes lists them. A well without a target gets its fluorophore, or "unnamed target", as target.
+function rdmlIds(rows) {
+  const attrs = r => JSON.stringify([ROLE_TYPE[r.role] || "unkn", r.group || "", r.bio_unit || "", r.role === "standard" ? r.quantity ?? "" : ""]);
+  const base = r => idOk(r.sample || r.bio_unit || r.key), first = new Map(), ids = new Map(), split = new Map();
+  for (const r of rows) { const b = base(r), a = attrs(r); if (!first.has(b)) first.set(b, a); if (first.get(b) !== a) split.set(b, true); }
+  const used = new Set();
+  const sidOf = r => {
+    const b = base(r), a = attrs(r), k = JSON.stringify([b, a]);
+    if (ids.has(k)) return ids.get(k);
+    let id = b;
+    if (split.has(b)) { let i = 2; while (used.has(id)) id = `${b} #${i++}`; } // the first variant keeps the name
+    used.add(id); ids.set(k, id); return id;
+  };
+  const tidOf = r => r.target || r.fluor || "unnamed target";
+  return { sidOf, tidOf, split: [...split.keys()] };
 }
 // Raw melt curves of the run, keyed like the amplification series. RDML's mdp holds fluorescence, so a melt file of
 // derivative values isn't written (the export's description says so).
@@ -182,14 +203,16 @@ export function rdmlNotes(exp, res) {
   const rows = res?.rows || [], notes = [];
   const noPos = rows.filter(r => !r.key && r.role !== "empty");
   if (noPos.length) notes.push(`${noPos.length} well(s) without a valid plate position were left out (${noPos.slice(0, 5).map(r => r.well || "?").join(", ")}).`);
-  const kept = rows.filter(r => r.key && r.role !== "empty" && r.target);
-  const noTarget = rows.filter(r => r.key && r.role !== "empty" && !r.target);
-  if (noTarget.length) notes.push(`${noTarget.length} well(s) without a target were left out (${noTarget.slice(0, 5).map(r => r.key).join(", ")}).`);
+  const kept = rows.filter(r => r.key && r.role !== "empty");
+  const noTarget = kept.filter(r => !r.target);
+  if (noTarget.length) notes.push(`${noTarget.length} well(s) had no target; RDML needs one, so ${noTarget.some(r => r.fluor) ? "the fluorophore" : "“unnamed target”"} was used (${noTarget.slice(0, 5).map(r => r.key).join(", ")}).`);
+  const { split } = rdmlIds(kept);
+  if (split.length) notes.push(`RDML keeps group, biological unit and quantity per sample, so samples whose wells differ in these were written as separate samples, numbered “#2”, “#3”…: ${split.slice(0, 5).map(x => `“${x}”`).join(", ")}${split.length > 5 ? ` and ${split.length - 5} more` : ""}.`);
   const noSample = kept.filter(r => !r.sample && !r.bio_unit);
   if (noSample.length) notes.push(`${noSample.length} reaction(s) had no sample name; RDML needs one, so the well name was used (${noSample.slice(0, 5).map(r => r.key).join(", ")}).`);
   const text = kept.filter(r => ctNum(r.ct, r.dc) === null && r.ct != null && String(r.ct).trim() !== "" && !/^(undetermined|undet|n\/?a|nan|no ?c[tq]|-|none|no amp)$/i.test(String(r.ct).trim()));
   if (text.length) notes.push(`${text.length} Cq value(s) that weren't numbers were left out (${text.slice(0, 5).map(r => `${r.key} “${r.ct}”`).join(", ")}); RDML holds numeric Cq only.`);
-  const seen = new Set(), dup = kept.filter(r => { const k = `${r.key}|${r.target}`; if (seen.has(k)) return true; seen.add(k); return false; });
+  const seen = new Set(), dup = kept.filter(r => { const k = `${r.key}|${r.target || r.fluor || ""}`; if (seen.has(k)) return true; seen.add(k); return false; });
   if (dup.length) notes.push(`${dup.length} duplicate result(s) for the same target in one well were left out (${dup.slice(0, 5).map(r => `${r.key} ${r.target}, line ${r.line}`).join("; ")}); RDML holds one result per target per well, so the first was written.`);
   if (exp.melt && exp.melt.valueType !== "fluorescence") notes.push("The melt curves are derivative values; RDML holds raw melt fluorescence, so they weren't included.");
   return notes;

@@ -23,6 +23,7 @@ Comma, tab or semicolon separated text, or a sheet of an Excel workbook. Column 
 | Quantity | `Quantity`, `Starting Quantity (SQ)`, `SQ`, `Qty` | no |
 | Group | `Group`, `Condition`, `Biological Group`, `Biological Set Name` | no |
 | Biological unit | `bio_unit`, `Biological Unit`, `Biological Replicate`, `Bio Rep` | no |
+| (any Ct/Cq) | A Ct/Cq of 0 or below is read as no Ct, like “Undetermined”: instruments write 0 (RDML −1) for no amplification. | |
 | Chemistry | `Chemistry`, `Dye Chemistry` (for example `hydrolysis probe`, `TaqMan`, `SYBR`); only used by the per-well efficiency (LinRegPCR) | no |
 
 The header row is found anywhere in the first 500 lines (the first row with both a well and a Ct/Cq column). Lines before it are kept as file metadata (`* key = value`, `key,value` and `key: value` lines). The table ends at the next `[Section]` line or a repeated header; blank lines inside it are skipped. A trailing block of rows without well positions (for example Slope / R² or “Analysis Type”) is reported as a footer, not data.
@@ -54,7 +55,7 @@ RDML (Real-time PCR Data Markup Language, https://rdml.org; Lefever et al. 2009,
 | `excl` | excluded on the instrument (like QuantStudio's Omit) |
 | target type `ref` | named in the upload note, to choose as references in the Analysis step |
 
-A file with several runs uses the first and says so; load another with Replace. Runs with curves but no Cq values (raw-data-only RDML) get their Cq from LinRegPCR on import (see docs/analysis.md, “Per-well efficiency”), and the upload note says so. Each target's `dyeChemistry` is kept as the Chemistry column.
+A file with several runs uses the first and says so; load another with Replace. Runs with curves but no Cq values (raw-data-only RDML) get their Cq from LinRegPCR on import (see docs/analysis.md, “Per-well efficiency”), and the upload note says so. Each target's `dyeChemistry` is kept as the Chemistry column. On export, RDML keeps type, group, biological unit and quantity per sample, so wells that share a sample name but differ in these become separate samples named “S1 #2”, “S1 #3” (the download note lists them); a well without a target gets its fluorophore, or “unnamed target”.
 
 **Export.** Report step, Other formats, "Download RDML": RDML 1.3 with the plate format, samples (type, standards' quantity, group and biological unit as annotations), targets (type `ref` for the analysis references; standard-curve efficiency where there is one), and per reaction the Cq, the exclusion flag and the raw amplification and melt points. What RDML can't hold is listed after the download: wells without a plate position or target, reactions without a sample name (the well name is used), Cq values that aren't numbers, a second result for the same target in one well, and melt curves that are derivative values (RDML holds raw melt fluorescence).
 
@@ -83,6 +84,8 @@ Import template: `well,sample,target,ct,role,group,bio_unit,quantity` (downloada
 ### Amplification and melt curves (optional)
 - The header row can sit below a block of run details (as in QuantStudio Excel exports); the first row with a `Cycle` or `Temperature` column is used.
 - **Long layout**: columns for well, optional target, `Cycle` (or `Temperature`), and a value (`Delta Rn`, `ΔRn`, `RFU`, `Fluorescence`, `Rn`, `Value`; for melt also `Derivative`, `-dF/dT`, `-d(RFU)/dT`, `-Rn'`).
+- When a file has both `Delta Rn` and `Rn`, the curve checks use ΔRn and the per-well efficiency (LinRegPCR) uses Rn.
+- **LightCycler 480 “Raw Data” text export**: `SamplePos`, `Cycle#` and the channel column (`465-510` …) are read as well, cycle and value.
 - **Wide layout**: a `Cycle` or `Temperature` column plus one column per well (`A1`, `A01`, …), as in CFX amplification and melt exports.
 - Melt values can be derivative or raw fluorescence; the user confirms which at import.
 
@@ -93,7 +96,7 @@ Import template: `well,sample,target,ct,role,group,bio_unit,quantity` (downloada
 
 | Export | Contents |
 |---|---|
-| `<title>-report.pdf` | The report as an A4 PDF, made in the browser (web/report-pdf.js; pdfmake, MIT; IBM Plex fonts embedded, OFL): first page with the run identity, status, finding counts, a plate overview (rings on wells in open findings) and a contents list; then the findings, the method sections and the plate map and history as appendices. Running header with the run ID, footer with the app build, the results file checksum and page numbers. While any finding is unreviewed every page carries a DRAFT · NOT REVIEWED watermark and the footer says how many are open; once all are reviewed the watermark is a faint PlateCheck mark. Vector text, so it can be searched and copied. Nothing is sent anywhere. |
+| `<title>-report.pdf` | The report as an A4 PDF, made in the browser (web/report-pdf.js; pdfmake, MIT; IBM Plex fonts embedded, OFL): first page with the run identity, status, finding counts, a plate overview (rings on wells in open findings) and a contents list; then the findings, the method sections and the plate map and history as appendices. Running header with the run ID, footer with the app build, the results file checksum and page numbers. While any finding is unreviewed every page carries a DRAFT · NOT REVIEWED watermark and the footer says how many are open; once all are reviewed the watermark is a faint PlateCheck mark. Vector text, so it can be searched and copied. Nothing is sent anywhere. Long names without spaces wrap inside their column; Greek and other letters Plex Mono lacks are set in Plex Sans; characters IBM Plex doesn't have at all (CJK, emoji) show as empty boxes in the PDF but are intact in the HTML report. |
 | `<title>-report.html` | The same report as a web page (Report → Other formats), readable without PlateCheck. |
 | `<id>.wells.csv` | One row per source data row: source line, raw and normalised well, effective labels, role and its source, raw Ct/Cq, and the file's original label values. |
 | `<id>.findings.csv` | One row per finding: ID, rule, rule version, category, severity, description, wells, source lines, evidence, next check, disposition, note, reviewer. |

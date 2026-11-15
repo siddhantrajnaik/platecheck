@@ -12,7 +12,7 @@ const run = () => {
   e.melt = C.fileRecord({ name: "m", text: d.melt, sha: "z", actor: "qa", valueType: "derivative" });
   return { e, res: C.analyze(e) };
 };
-const texts = node => { const out = []; const walk = n => { if (n == null) return; if (typeof n === "string") out.push(n); else if (Array.isArray(n)) n.forEach(walk); else if (typeof n === "object") for (const [k, v] of Object.entries(n)) if (k !== "svg") walk(v); }; walk(node); return out.join(" "); };
+const texts = node => { const out = []; const walk = n => { if (n == null) return; if (typeof n === "string") out.push(n); else if (Array.isArray(n)) n.forEach(walk); else if (typeof n === "object") for (const [k, v] of Object.entries(n)) if (k !== "svg") walk(v); }; walk(node); return out.join(" ").replace(/\u200b/g, ""); }; // invisible break points in long words
 
 test("open findings make it a draft on every page; once all are reviewed the watermark is the plain mark", () => {
   const { e, res } = run(), doc = reportPdfDoc(e, res, { generatedAt: "2026-11-15T10:00:00Z" });

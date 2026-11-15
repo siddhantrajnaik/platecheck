@@ -42,7 +42,13 @@ export function genorm(x, genes, minNr = 2) {
   return { ranking, steps, V, M: steps[0].M };
 }
 
-// NormFinder (NormqPCR stabMeasureRho, log = TRUE, returnAll). groups: one label per sample (row).
+// NormFinder as its authors' R code does it (Andersen et al. 2004; MOMA r.NormOldStab5): a negative within-group
+// variance estimate is replaced by the gene's smallest pairwise variance / 4 (NormqPCR sets it to 0, which can change
+// the best gene), and the best pair is searched over all pairs of candidates (genes under 0.25 on the natural-log
+// scale, or the 4 most stable). Checked against the 80 values published in PeerJ 10.7717/peerj.14221
+// (platecheck-qa/papers/quant-refgenes-published). groups: one label per sample (row). Values on the log2 scale.
+const pairVarMin = (rows, j, k) => { let best = Infinity; for (let h = 0; h < k; h++) if (h !== j) { const dd = rows.map(r => r[j] - r[h]).filter(isNum), mu = mean(dd); if (dd.length > 1) best = Math.min(best, dd.reduce((a, y) => a + (y - mu) ** 2, 0) / (dd.length - 1)); } return best; };
+const fixNeg = (vals, rows, k) => vals.map((v, j) => (v < 0 ? pairVarMin(rows, j, k) / 4 : v));
 export function normfinder(x, groups) {
   const k = x[0]?.length ?? 0, levels = [...new Set(groups)].sort(), m = levels.length;
   if (k < 3) return null;
@@ -51,7 +57,7 @@ export function normfinder(x, groups) {
     const mei = Array.from({ length: k }, (_, j) => mean(col(x, j))), me = mean(mej);
     const a = Array.from({ length: k }, (_, j) => { const v = x.map((r, s) => (isNum(r[j]) ? (r[j] - mej[s] - mei[j] + me) ** 2 : null)).filter(isNum); return v.reduce((s, y) => s + y, 0) / (v.length - 1); });
     const b = a.reduce((s, y) => s + y, 0);
-    return { groups: levels, variance: a.map(v => (v - b / (k * (k - 1))) / (1 - 2 / k)) };
+    return { groups: levels, variance: fixNeg(a.map(v => (v - b / (k * (k - 1))) / (1 - 2 / k)), x, k) };
   }
   const idx = levels.map(l => groups.map((g, s) => (g === l ? s : -1)).filter(s => s >= 0)), ngr = idx.map(i => i.length);
   const meigr = idx.map(rows => Array.from({ length: k }, (_, j) => mean(rows.map(s => x[s][j]))));
@@ -59,7 +65,7 @@ export function normfinder(x, groups) {
   const vg = idx.map((rows, i) => {
     const a = Array.from({ length: k }, (_, j) => { const v = rows.map(s => (isNum(x[s][j]) ? (x[s][j] - meigr[i][j] - mej[s] + megr[i]) ** 2 : null)).filter(isNum); return v.reduce((s, y) => s + y, 0) / (v.length - 1); });
     const b = a.reduce((s, y) => s + y, 0);
-    return a.map(v => Math.max((v - b / (k * (k - 1))) / (1 - 2 / k), 0));
+    return fixNeg(a.map(v => (v - b / (k * (k - 1))) / (1 - 2 / k)), rows.map(r => x[r]), k);
   });
   const m1i = Array.from({ length: k }, (_, j) => mean(meigr.map(r => r[j]))), m1j = meigr.map(r => mean(r)), m1 = mean(m1j);
   const dif = Array.from({ length: k }, (_, j) => levels.map((_, i) => meigr[i][j] - m1j[i] - m1i[j] + m1)); // genes × groups
@@ -68,15 +74,17 @@ export function normfinder(x, groups) {
   const d = dif.map((r, j) => r.map((v, i) => (tau + va[i][j] > 0 ? v * tau / (tau + va[i][j]) : 0)));
   const v = Array.from({ length: k }, (_, j) => levels.map((_, i) => va[i][j] + (tau + va[i][j] > 0 ? tau * va[i][j] / (tau + va[i][j]) : 0)));
   const rho = d.map((r, j) => mean(r.map((dv, i) => Math.abs(dv) + Math.sqrt(v[j][i]))));
-  // best pair (NormqPCR selectHKs, method "NormFinder", minNrHKs = 2)
-  const b1 = rho.indexOf(Math.min(...rho));
-  let bestJ = -1, best = Infinity;
-  for (let j = 0; j < k; j++) if (j !== b1) {
-    const a2 = levels.map((_, i) => ((d[b1][i] + d[j][i]) / 2) * Math.sqrt(k / (k - 2))), bb = levels.map((_, i) => (v[b1][i] + v[j][i]) / 2 / 2);
-    const r = mean(a2.map((av, i) => Math.abs(av) + Math.sqrt(bb[i])));
-    if (r < best) { best = r; bestJ = j; }
+  // best pair: every pair of candidate genes (stability < 0.25 in natural-log units, else the 4 most stable)
+  const sorted = [...rho].sort((a, b) => a - b), lim = 0.25 / Math.LN2;
+  let cand = rho.map((r, j) => j).filter(j => rho[j] < lim);
+  if (cand.length < 4) cand = rho.map((r, j) => j).filter(j => rho[j] <= sorted[Math.min(3, k - 1)]);
+  let bestPair = null, best = Infinity;
+  for (let a = 0; a < cand.length; a++) for (let b = a + 1; b < cand.length; b++) {
+    const g1 = cand[a], g2 = cand[b];
+    const r = mean(levels.map((_, i) => (Math.abs(d[g1][i] + d[g2][i]) / 2) * Math.sqrt(k / (k - 2)) + Math.sqrt(v[g1][i] + v[g2][i]) / 2));
+    if (r < best) { best = r; bestPair = rho[g1] <= rho[g2] ? [g1, g2] : [g2, g1]; }
   }
-  return { groups: levels, rho, d, v, tau, bestPair: [b1, bestJ], bestPairRho: best };
+  return { groups: levels, rho, d, v, tau, bestPair, bestPairRho: best };
 }
 
 // From PlateCheck rows: per biological unit, the mean Ct of each candidate gene (technical replicates averaged), on the

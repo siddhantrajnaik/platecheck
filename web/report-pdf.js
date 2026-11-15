@@ -7,7 +7,7 @@ import {
   RULESET_FIELDS, REFERENCES, rulesetChanges, referencesFor, reviewOf, wellKey,
 } from "./core.js";
 import { CREDIT } from "./credit.js";
-import { LIMITATIONS, esc } from "./report.js";
+import { LIMITATIONS, esc, missingGroups } from "./report.js";
 import * as Q from "./absquant.js";
 import * as RG from "./refgenes.js";
 import { analysisReportHtml } from "./analysis.js";
@@ -25,6 +25,25 @@ const sentence = l => (l.length > 1 ? l.slice(0, -1).join(", ") + " and " + l.at
 const cap = s => (s ? s[0].toUpperCase() + s.slice(1) : "");
 const str = v => (v === null || v === undefined || v === "" ? "—" : String(v));
 
+// Final pass over every text: invisible break points in long words (names without spaces would push tables off the
+// page), the superscript minus that Plex lacks, and Plex Sans instead of Plex Mono for text Mono can't show (Greek...).
+const U = (...c) => String.fromCharCode(...c); // kept ASCII-only on purpose
+const ZW = U(0x200b), SUP_MINUS = new RegExp(U(0x207b), "g"), SUP_PLUS = new RegExp(U(0x207a), "g"), MINUS = U(0x2212);
+const soft = t => t.replace(/[^\s]{14,}/g, w => w.replace(/([_\-./,;:|+])(?!$)|([^_\-./,;:|+]{12})(?!$)/g, m => m + ZW));
+const fixText = t => soft(t.replace(SUP_MINUS, MINUS).replace(SUP_PLUS, "+"));
+const MONO_OK = new RegExp("^[" + U(0) + "-" + U(0x24f) + U(0x2000) + "-" + U(0x206f) + U(0x2190) + "-" + U(0x21ff) + MINUS + "]*$");
+const flat = t => (typeof t === "string" ? t : Array.isArray(t) ? t.map(flat).join("") : t && typeof t === "object" ? flat(t.text) : "");
+function polish(n) {
+  if (typeof n === "string") return fixText(n);
+  if (Array.isArray(n)) return n.map(polish);
+  if (!n || typeof n !== "object" || n.svg || n.canvas || n.toc) return n;
+  const o = { ...n };
+  if (o.font === "Mono" && !MONO_OK.test(flat(o.text))) o.font = "Plex";
+  for (const k of ["text", "ul", "ol", "stack", "columns"]) if (k in o) o[k] = polish(o[k]);
+  if (o.table) o.table = { ...o.table, body: o.table.body.map(r => r.map(polish)) };
+  return o;
+}
+
 const LINES = { // hairlines between rows only, no verticals
   hLineWidth: (i, node) => (i === 0 ? 0 : i === node.table.headerRows ? 0.8 : 0.4), vLineWidth: () => 0,
   hLineColor: (i, node) => (i === node.table.headerRows ? RULE : HAIR),
@@ -32,7 +51,7 @@ const LINES = { // hairlines between rows only, no verticals
 };
 function table(head, rows, { widths, mono = [], size = 8 } = {}) {
   if (!rows.length) return { text: "None.", style: "muted", margin: [0, 0, 0, 8] };
-  return { table: { headerRows: 1, dontBreakRows: true, widths: widths || head.map(() => "auto"),
+  return { table: { headerRows: 1, keepWithHeaderRows: 1, dontBreakRows: true, widths: widths || head.map(() => "auto"),
       body: [head.map(h => ({ text: h, style: "th" })), ...rows.map(r => r.map((c, i) => ({ text: str(c), fontSize: size, ...(mono.includes(i) ? { font: "Mono", fontSize: size - 0.5 } : {}) })))] },
     layout: LINES, margin: [0, 2, 0, 10] };
 }
@@ -86,7 +105,7 @@ function plateSvg(res, exp) {
   const rank = { high: 3, medium: 2, low: 1, info: 0 }, flag = {};
   for (const f of res.findings) {
     const r = reviewOf(exp.reviews || {}, f);
-    if (f.severity === "info" || (r?.disposition && r.disposition !== "unreviewed")) continue;
+    if (f.severity === "info" || f.category === "missing_context" || (r?.disposition && r.disposition !== "unreviewed")) continue;
     for (const w of f.wells || []) { const k = wellKey(w); if (k && (!flag[k] || rank[f.severity] > rank[flag[k]])) flag[k] = f.severity; }
   }
   const byKey = {};
@@ -116,7 +135,7 @@ export function reportPdfDoc(exp, res, { generatedAt = new Date().toISOString() 
   const ids = new Set(res.findings.map(f => f.id));
   const orphan = Object.entries(rv).filter(([id, r]) => !ids.has(id) && r.disposition && r.disposition !== "unreviewed");
   let n = 0; const sec = { next: () => ++n };
-  const draft = s.open > 0;
+  const draft = s.open > 0 || !p; // nothing checked is not a final report either
 
   const decision = f => {
     const r = reviewOf(rv, f);
@@ -145,11 +164,11 @@ export function reportPdfDoc(exp, res, { generatedAt = new Date().toISOString() 
     { canvas: [{ type: "line", x1: 0, y1: 0, x2: 483, y2: 0, lineWidth: 0.6, lineColor: RULE }], margin: [0, 14, 0, 12] },
     { table: { widths: [3, "*"], body: [[{ text: "", fillColor: STATUS[s.status] || MUTE }, { stack: [
       { text: [{ text: `${s.label}. `, bold: true, color: STATUS[s.status] || INK, fontSize: 11 },
-        { text: main.length + info.length ? `${s.reviewed} of ${s.total} findings reviewed, ${s.open} still open.` : "Nothing was flagged by the checks that ran.", fontSize: 10 }] },
+        { text: !p ? "No results file was imported, so nothing was checked." : main.length + info.length ? `${s.reviewed} of ${s.total} findings reviewed, ${s.open} still open.` : "Nothing was flagged by the checks that ran.", fontSize: 10 }] },
       { text: "These are things PlateCheck thought worth a second look. It doesn't certify the experiment or its conclusions, and anything listed under “Not checked” wasn't looked at.", style: "muted", margin: [0, 3, 0, 0] }] }]] },
       layout: { hLineWidth: () => 0, vLineWidth: () => 0, paddingLeft: i => (i ? 10 : 0), paddingRight: () => 0, paddingTop: () => 2, paddingBottom: () => 2 } },
     { columns: counts.map(([k, v, c]) => ({ stack: [{ text: String(v ?? 0), fontSize: 15, color: v ? c : RULE, bold: !!v }, { text: k, fontSize: 7, color: MUTE }] })), margin: [0, 16, 0, 16] },
-    res.rows.some(r => r.key) && { stack: [{ svg: plateSvg(res, exp), width: 360 },
+    res.rows.some(r => r.key) && { stack: [{ svg: plateSvg(res, exp), width: (exp.title || "").length > 84 ? 250 : (exp.title || "").length > 42 ? 300 : 360 },
       { text: [{ text: "Plate overview. ", bold: true }, "Shaded: well has a Ct (tan: no-template or no-RT control). Open: no Ct. Coloured ring: well is in a finding that is not reviewed yet (red high, orange medium, olive low). Dashed: no data."], style: "caption" }], margin: [0, 0, 0, 4] },
 
     { toc: { title: { text: "CONTENTS", fontSize: 6.5, color: MUTE, characterSpacing: 0.8, margin: [0, 14, 0, 4] }, textStyle: { fontSize: 8, lineHeight: 1 }, numberStyle: { color: MUTE, fontSize: 8, lineHeight: 1 }, textMargin: [0, 0, 0, 0] } },
@@ -161,9 +180,8 @@ export function reportPdfDoc(exp, res, { generatedAt = new Date().toISOString() 
       bullets(orphan.map(([, r]) => `${r.title || ""}: ${DISPOSITION_LABEL[r.disposition]} by ${r.by} on ${when(r.at)}${r.note ? `. ${r.note}` : ""}`))] : [],
 
     heading("Method details not provided", sec),
-    missing.length ? bullets(missing.map(f => { const r = reviewOf(rv, f), d = r?.disposition && r.disposition !== "unreviewed";
-      return { text: [f.title.replace(/^Not provided: /, ""), f.severity === "info" ? { text: " (optional)", color: MUTE } : "", d ? { text: `  ${DISPOSITION_LABEL[r.disposition].toLowerCase()}${r.note ? `: ${r.note}` : ""}`, color: MUTE } : ""] }; }))
-      : { text: "Everything asked for was provided.", margin: [0, 0, 0, 8] },
+    missing.length ? bullets(missingGroups(missing, rv).map(g => ({ text: [g.title, g.optional ? { text: " (optional)", color: MUTE } : "", g.count ? { text: ` (${g.count})`, color: MUTE } : "", g.decided ? { text: `  ${g.decided}`, color: MUTE } : ""] })))
+      : { text: p ? "Everything asked for was provided." : "No results file was imported, so nothing could be checked.", margin: [0, 0, 0, 8] },
 
     heading("What was checked", sec),
     bullets(res.checksRun),
@@ -199,15 +217,16 @@ export function reportPdfDoc(exp, res, { generatedAt = new Date().toISOString() 
       table(["Target", "Efficiency", "95% CI of efficiency", "R²", "Slope", "Intercept", "Levels"], res.stdCurves.map(c => { const d = Q.curveDetails(c);
         return [c.target, num(c.efficiency, 1) + "%", d?.effLow != null ? `${num(d.effLow, 1)}–${num(d.effHigh, 1)}%` : "—", num(c.r2, 4), num(c.slope, 3), num(c.intercept), c.levels]; })),
       (() => { const q = Q.quantify(res.rows, res.stdCurves); return q.units.length ? [{ text: "Absolute quantity of unknowns", style: "h3" },
-        { text: "Read off each target's standard curve at the mean Ct of the replicate wells, in the standards' units, with a 95% prediction interval (Massart et al. 1997).", style: "muted", margin: [0, 0, 0, 4] },
-        table(["Target", "Biological unit", "Wells", "Mean Ct", "Quantity", "95% prediction interval", "Note"], q.units.map(u => [u.target, u.unit, `${u.n}/${u.wells.length}`, num(u.meanCt), Q.fmtQ(u.q), u.qLow == null ? "—" : `${Q.fmtQ(u.qLow)} – ${Q.fmtQ(u.qHigh)}`, u.note]))] : []; })()] : [],
+        { text: "Read off each target's standard curve at the mean Ct of the replicate wells, in the standards' units, with a 95% prediction interval (Massart et al. 1997). \"Mean of well quantities\" is QuantStudio's Quantity Mean, for comparison.", style: "muted", margin: [0, 0, 0, 4] },
+        q.warnings.map(w => ({ text: w, style: "muted", margin: [0, 0, 0, 3] })),
+        table(["Target", "Biological unit", "Wells", "Mean Ct", "Quantity", "95% prediction interval", "Mean of well quantities", "Note"], q.units.map(u => [u.target, u.unit, `${u.n}/${u.wells.length}`, num(u.meanCt), Q.fmtQ(u.q), u.qLow == null ? "—" : `${Q.fmtQ(u.qLow)} – ${Q.fmtQ(u.qHigh)}`, Q.fmtQ(u.qWellMean), u.note]))] : []; })()] : [],
 
     // ---- appendices
     { ...heading("Plate map", sec), pageBreak: "before" },
     table(["Well", "Sample", "Target", "Group", "Role", "Biological unit", "Quantity", "Ct/Cq", "Changed from file"], res.rows.map(r => {
       const edited = Object.keys(exp.map?.[r.id] || {}).map(k => `${FIELD_LABEL[k] || k} was “${r.file[k] ?? ""}”`).join("; ");
       return [r.key || r.well, r.sample, r.target, r.group, ROLE_LABEL[r.role] + (r.roleSource.startsWith("inferred") ? " (from name)" : ""), r.bio_unit, r.quantity, r.ct ?? "(empty)", edited];
-    }), { size: 7, mono: [7] }),
+    }), { size: 7, mono: [7], widths: [24, "*", "*", 44, 58, "*", 40, 38, 52] }),
 
     heading("History", sec),
     table(["When", "Who", "What"], exp.audit.map(a => [when(a.at), a.actor, a.detail]), { widths: [78, 70, "*"], size: 7.5 }),
@@ -226,14 +245,14 @@ export function reportPdfDoc(exp, res, { generatedAt = new Date().toISOString() 
   return {
     pageSize: "A4", pageMargins: [56, 64, 56, 56],
     info: { title: `${exp.title}: qPCR run review`, author: exp.operator || CREDIT.name, subject: "qPCR run review (PlateCheck)", creator: `PlateCheck ${APP_VERSION} (build ${BUILD})`, producer: "PlateCheck", keywords: `qPCR, ${exp.id}` },
-    watermark: draft ? { text: "DRAFT · NOT REVIEWED", color: SEV.high, opacity: 0.06, bold: true, fontSize: 54, angle: -45 } : { text: "PlateCheck", color: ACCENT, opacity: 0.035, bold: true, fontSize: 96, angle: -45 },
+    watermark: draft ? { text: p ? "DRAFT · NOT REVIEWED" : "DRAFT · NOTHING CHECKED", color: SEV.high, opacity: 0.06, bold: true, fontSize: 54, angle: -45 } : { text: "PlateCheck", color: ACCENT, opacity: 0.035, bold: true, fontSize: 96, angle: -45 },
     header: page => (page === 1 ? null : { margin: [56, 28, 56, 0], stack: [
       { columns: [{ text: exp.title || "", fontSize: 7.5, color: MUTE }, { text: [{ text: "qPCR run review · ", color: MUTE }, { text: exp.id, font: "Mono" }], fontSize: 7.5, alignment: "right" }] },
       { canvas: [{ type: "line", x1: 0, y1: 4, x2: 483, y2: 4, lineWidth: 0.4, lineColor: RULE }] }] }),
     footer: (page, pages) => ({ margin: [56, 18, 56, 0], columns: [
-      { text: [`PlateCheck ${APP_VERSION} · build ${BUILD}`, srcSha ? ` · results file ${srcSha}` : "", draft ? { text: `  ·  draft: ${s.open} finding${s.open === 1 ? "" : "s"} not reviewed`, color: SEV.high } : ""], fontSize: 6.5, color: MUTE },
+      { text: [`PlateCheck ${APP_VERSION} · build ${BUILD}`, srcSha ? ` · results file ${srcSha}` : "", draft ? { text: !p ? "  ·  draft: no results file" : `  ·  draft: ${s.open} finding${s.open === 1 ? "" : "s"} not reviewed`, color: SEV.high } : ""], fontSize: 6.5, color: MUTE },
       { text: `Page ${page} of ${pages}`, fontSize: 6.5, color: MUTE, alignment: "right", width: 70 }] }),
-    content,
+    content: polish(content),
     defaultStyle: { font: "Plex", fontSize: 8.5, lineHeight: 1.25, color: INK },
     styles: {
       title: { fontSize: 22, bold: true, lineHeight: 1.1 },
@@ -243,7 +262,8 @@ export function reportPdfDoc(exp, res, { generatedAt = new Date().toISOString() 
       muted: { color: MUTE, fontSize: 7.5 },
       caption: { color: MUTE, fontSize: 7, margin: [0, 4, 0, 0] },
     },
-    pageBreakBefore: (node, after) => node.headlineLevel === 1 && after.length === 0, // a heading never ends a page
+    // a heading never ends a page, nor starts in its last sixth (it would get a line or a table header under it)
+    pageBreakBefore: (node, q) => node.headlineLevel === 1 && (node.startPosition?.verticalRatio > 0.82 || !q.getFollowingNodesOnPage().some(x => !x.canvas && x.style !== "h2")),
   };
 }
 

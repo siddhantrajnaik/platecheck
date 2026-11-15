@@ -6,7 +6,7 @@
 // so every existing check still runs on an IP or input well exactly as on any other sample. The assay labels are
 // a second, separate layer kept in exp.assaySetup = { type, sourceSha, params, wells: { [rowId]: { role, set, fraction } } }.
 // "set" ties wells of one chromatin / DNA / lysate together (IP, input and IgG from the same chromatin share a set).
-import { ctNum, groupBy } from "./core.js";
+import { ctNum, toNum, groupBy } from "./core.js";
 import { cleanConditions, cleanStats, compareConditions, replicateReportHtml } from "./assay-stats.js";
 
 // ---------------------------------------------------------------- references (checked against PubMed, Nov 2026)
@@ -309,6 +309,9 @@ export function guessLabels(rows, family) {
   return out;
 }
 
+// NPX values given directly can be 0 or negative, so they are read as plain numbers (a Ct of 0 or less means no Ct).
+const npxNum = (v, dc) => (v == null || /^(undetermined|nan|n\/?a|-|none)$/i.test(String(v).trim()) ? null : toNum(v, dc));
+
 // ---------------------------------------------------------------- labelled wells and replicate means
 // Rows from core.effectiveRows with their assay label. NTC and empty wells never take part.
 export function labelRows(rows, setup) {
@@ -316,7 +319,7 @@ export function labelRows(rows, setup) {
   // A well the user (or the name guess) labelled as Blank counts even if PlateCheck's run checks treat it as an NTC.
   return rows.filter(r => wells[r.id] && r.role !== "empty" && (r.role !== "ntc" || wells[r.id].role === "blank")).map(r => {
     const w = wells[r.id];
-    return { ...r, arole: w.role, aset: w.set || defaultSet(r), afraction: w.fraction || "", ctv: ctNum(r.ct, r.dc) };
+    return { ...r, arole: w.role, aset: w.set || defaultSet(r), afraction: w.fraction || "", ctv: setup?.params?.npxInput === "npx" ? npxNum(r.ct, r.dc) : ctNum(r.ct, r.dc) };
   });
 }
 const mean = xs => xs.reduce((a, b) => a + b, 0) / xs.length;
