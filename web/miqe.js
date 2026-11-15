@@ -5,6 +5,7 @@
 // Pure functions, no DOM.
 import { APP_VERSION, BUILD, PARSER_VERSION, toCsv } from "./core.js";
 import * as Q from "./absquant.js";
+import * as RG from "./refgenes.js";
 
 export const MIQE_SOURCE = "Bustin SA, Ruijter JM, van den Hoff MJB, et al. MIQE 2.0: Revision of the Minimum Information for Publication of Quantitative Real-Time PCR Experiments Guidelines. Clin Chem 2025;71(6):634–651. doi:10.1093/clinchem/hvaf043 (Table 1).";
 export const SECTIONS = ["Reagent preparation", "Sample preparation", "Reverse transcription", "qPCR protocol", "Data analysis"];
@@ -87,7 +88,9 @@ function suggestions(exp, res, a) {
   const quant = d.length && Q.quantify(res.rows, res.stdCurves).units.length ? "Absolute quantities of unknowns read off the standard curves at the mean Cq, with 95% prediction intervals. " : "";
   if (a?.ok !== false && a?.settings?.on) {
     put("5.9", quant + (a.settings.efficiency ? "Relative quantities efficiency-corrected with each target's standard-curve efficiency (Pfaffl 2001)." : "Relative quantities by 2^−ΔΔCq assuming 100% efficiency (Livak & Schmittgen 2001); MIQE 2.0 asks for efficiency-corrected quantities, so state the efficiencies or switch on efficiency correction."), a.settings.efficiency || quant ? "yes" : "");
-    if (a.refStability?.length) put("5.15", a.refStability.map(r => `${r.target}: Cq differs between groups by ${fmt(r.range, 2)} cycles${r.p != null ? ` (${r.test}, p = ${r.p < 0.001 ? r.p.toExponential(1) : fmt(r.p, 3)})` : ""}${r.flagged ? ", flagged" : ""}`).join("; ") + ". PlateCheck checks that references don't shift between groups; stability ranking (geNorm / NormFinder) is not done.", "");
+    const stab = RG.forRun(res, a.settings).r, stabText = RG.summaryText(stab);
+    if (stabText) put("5.15", stabText + (a.refStability?.length ? " References were also checked for a shift between groups (Analysis step)." : ""));
+    else if (a.refStability?.length) put("5.15", a.refStability.map(r => `${r.target}: Cq differs between groups by ${fmt(r.range, 2)} cycles${r.p != null ? ` (${r.test}, p = ${r.p < 0.001 ? r.p.toExponential(1) : fmt(r.p, 3)})` : ""}${r.flagged ? ", flagged" : ""}`).join("; ") + ". PlateCheck checks that references don't shift between groups; stability ranking (geNorm / NormFinder) is not done.", "");
     // The analysis methods paragraph: normalisation up to "Statistics on …", the statistics from there on.
     if (a.method) { const i = a.method.indexOf(" Statistics on "); put("5.16", (i > 0 ? a.method.slice(0, i) : a.method).trim()); if (i > 0) put("5.17", a.method.slice(i + 1).trim()); }
     put("5.18", "Two-sided tests at α = 0.05; statistical power was not calculated in PlateCheck.", "");

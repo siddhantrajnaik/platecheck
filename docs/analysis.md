@@ -173,7 +173,16 @@ For each chosen reference I compare its mean Ct between groups (units averaged f
 - the group means differ by more than 0.5 cycles (you can change this), or
 - the difference is significant (Welch t-test for two groups, ANOVA for more, p < 0.05).
 
-Why 0.5 cycles: a reference that moves by d cycles changes every fold change by about 2^d, so 0.5 cycles is already a 1.4-fold bias, which is about the size of effect many papers report. I added the p value because with good replicates a smaller shift can still be real; with 2 or 3 units per group the test has little power, which is why the cycle threshold is there as well. The check can't prove a reference is stable. geNorm (Vandesompele et al. 2002) with three or more candidate references is the better tool for choosing them in the first place.
+Why 0.5 cycles: a reference that moves by d cycles changes every fold change by about 2^d, so 0.5 cycles is already a 1.4-fold bias, which is about the size of effect many papers report. I added the p value because with good replicates a smaller shift can still be real; with 2 or 3 units per group the test has little power, which is why the cycle threshold is there as well. The check can't prove a reference is stable; for choosing references, use the stability ranking below.
+
+### Reference gene stability: geNorm and NormFinder
+
+The Analysis step's "Reference gene stability" card ranks candidate reference genes you tick (at least three; by default the analysis references when there are three or more). It never changes the references the analysis uses. Code: `web/refgenes.js`. Each biological unit's Ct is the mean of its technical replicates; units without a Ct for every candidate are left out and listed. Values are on the log2 quantity scale, −Ct · log2(E), with each gene's standard-curve efficiency when efficiency correction is on, otherwise E = 2.
+
+- **geNorm** (Vandesompele et al. 2002). M of a gene is the mean, over the other candidates, of the SD across units of their log2 ratio. The gene with the largest M is dropped and M recomputed, down to the best pair, which gives the ranking. The pairwise variation V(n/n+1) is the SD of log2(NF(n+1)/NF(n)), the change in the normalisation factor (geometric mean of the n best genes) when one more gene is added; below 0.15, the extra gene isn't needed. Rough guide for M (Hellemans et al. 2007): below 0.5 in fairly homogeneous samples, below 1 in heterogeneous ones.
+- **NormFinder** (Andersen et al. 2004). Within each group, each gene's variance after removing sample and gene effects (corrected for the number of genes), plus its systematic shift between groups, shrunk towards zero by an estimated between-group variance τ. ρ = mean over groups of |shift| + √(variance / n); lower is more stable. The best pair is the pair with the lowest combined ρ (the search NormqPCR's selectHKs uses). With one group only the within-group variances are given.
+
+**Checked against:** the calculations are a line-by-line port of the Bioconductor package NormqPCR (stabMeasureM, stabMeasureRho, selectHKs; Perkins et al. 2012), and equal it to 1e-12 on the data it ships: the geNorm paper's 85 samples in 5 tissues (M, ranking, mean M per step and V for every tissue) and the NormFinder paper's 28 bladder tumours (ρ for 14 genes, best gene HSPCB, best pair HSPCB and RPS13, no-group variances). On the bladder data the three lowest ρ are HSPCB, TEGT and ATP5B, the genes the NormFinder paper itself names for bladder; `tests/refgenes.test.mjs`. (The CRAN package ctrlGene was not used as a reference: its `pairwiseV` takes geometric means of raw Ct values.) The result also answers MIQE 2.0 checklist item 5.15 and appears in the report.
 
 ## Several plates (a study)
 
@@ -354,6 +363,9 @@ When the analysis is on, the HTML report gets an Analysis section: the method in
 
 ## References
 
+- Vandesompele J, De Preter K, Pattyn F, Poppe B, Van Roy N, De Paepe A, Speleman F (2002). Accurate normalization of real-time quantitative RT-PCR data by geometric averaging of multiple internal control genes. *Genome Biology* 3(7):research0034. doi:10.1186/gb-2002-3-7-research0034
+- Andersen CL, Jensen JL, Ørntoft TF (2004). Normalization of real-time quantitative reverse transcription-PCR data: a model-based variance estimation approach to identify genes suited for normalization, applied to bladder and colon cancer data sets. *Cancer Research* 64(15):5245–5250. doi:10.1158/0008-5472.CAN-04-0496
+- Perkins JR, Dawes JM, McMahon SB, Bennett DLH, Orengo C, Kohl M (2012). ReadqPCR and NormqPCR: R packages for the reading, quality checking and normalisation of RT-qPCR quantification cycle (Cq) data. *BMC Genomics* 13:296. doi:10.1186/1471-2164-13-296
 - Massart DL, Vandeginste BGM, Buydens LMC, de Jong S, Lewi PJ, Smeyers-Verbeke J (1997). *Handbook of Chemometrics and Qualimetrics, Part A*. Elsevier, Amsterdam; inverse prediction from a calibration line, p. 200 (the formula R's chemCal::inverse.predict implements).
 - Livak KJ, Schmittgen TD (2001). Analysis of relative gene expression data using real-time quantitative PCR and the 2^−ΔΔCT method. *Methods* 25(4):402–408. doi:10.1006/meth.2001.1262
 - Pfaffl MW (2001). A new mathematical model for relative quantification in real-time RT-PCR. *Nucleic Acids Research* 29(9):e45. doi:10.1093/nar/29.9.e45

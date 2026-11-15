@@ -886,6 +886,7 @@ export function cleanAnalysisSettings(a) {
     excluded: names(a.excluded), scale: a.scale === "linear" ? "linear" : "log2", test: ANALYSIS_TESTS.includes(a.test) ? a.test : "welch",
     refMaxShift: typeof shift === "number" && Number.isFinite(shift) && shift > 0 && shift <= 10 ? shift : 0.5,
     twoWay: ["factor2", "plate"].includes(a.twoWay) ? a.twoWay : "", // second factor for a two-way ANOVA; "" = none
+    refCandidates: names(a.refCandidates), // candidate reference genes for the geNorm / NormFinder card (web/refgenes.js)
     gsea: cleanGsea(a.gsea) }; // [gsea] gene set enrichment settings (web/gsea.js)
 }
 // [gsea] Settings of the gene set enrichment card. source "" means none chosen, so nothing is worked out by default.

@@ -5,6 +5,7 @@
 import * as A from "./analysis.js";
 import { studyReportHtml } from "./report.js";
 import * as GS from "./gsea.js"; // [gsea] gene set enrichment
+import * as RG from "./refgenes.js"; // reference-gene stability: geNorm, NormFinder
 
 const NS = "http://www.w3.org/2000/svg";
 // Okabe & Ito colour-blind safe colours: biological replicates blue, technical replicates orange.
@@ -368,7 +369,43 @@ export function analysisView(ax) {
   return [card(h("h2", null, "Analysis settings"),
       settingsPanel(ax, s, { targets: ch.targets, groups: ch.groups, hasCurves: (st.res.stdCurves || []).length > 0 }, set),
       h("div", { class: "row" }, h("button", { class: "btn", type: "button", onclick: () => set({ on: false }, "Analysis switched off") }, "Switch the analysis off"))),
-    ...resultsBlock(ax, a, base), a.ok && a.summary.some(r => !r.isControl) && gseaCard(ax, a, base)].filter(Boolean);
+    ...resultsBlock(ax, a, base), stabilityCard(ax, s, set, ch.targets), a.ok && a.summary.some(r => !r.isControl) && gseaCard(ax, a, base)].filter(Boolean);
+}
+// Reference-gene stability (web/refgenes.js): geNorm M and V, NormFinder ρ, for candidates the user ticks. It ranks;
+// it never changes the references the analysis uses.
+function stabilityCard(ax, s, set, targets) {
+  const { h, card, st } = ax, { cands, r, eff } = RG.forRun(st.res, s);
+  const tbl = (head, rows) => h("div", { class: "tablewrap" }, h("table", { class: "tbl" }, h("thead", null, h("tr", null, head.map(x => h("th", null, x)))), h("tbody", null, rows)));
+  const toggle = (t, on) => { const next = on ? [...new Set([...cands, t])] : cands.filter(x => x !== t); set({ refCandidates: next }, `Reference candidates: ${next.join(", ") || "none"}`); };
+  const out = [h("h2", null, "Reference gene stability (geNorm, NormFinder)"),
+    h("p", { class: "lede" }, "Ranks candidate reference genes by how steady they are across your samples, so you can choose references with evidence (MIQE 2.0 asks how references were validated). geNorm compares each gene with the others; NormFinder also looks for genes that shift between your groups. This doesn't change the references the analysis uses; set those above."),
+    h("div", { class: "checks" }, h("span", { class: "fine" }, "Candidates (tick at least three): "), targets.map(t => h("label", { class: "check" }, h("input", { type: "checkbox", checked: cands.includes(t), onchange: ev => toggle(t, ev.target.checked) }), t)))];
+  if (!r) return card(...out, h("p", { class: "muted" }, "Tick at least three candidate genes measured in every sample."));
+  out.push(...r.warnings.map(w => h("p", { class: "warn-line" }, w)));
+  if (r.genorm) {
+    const g = r.genorm, rank = Object.fromEntries(g.ranking.map((x, i) => [x, i + 1])), M0 = g.M;
+    const pair = g.ranking.slice(0, 2), Vs = g.V.slice().reverse();
+    out.push(h("h3", null, "geNorm"),
+      h("p", null, `Most stable pair: ${pair.join(" and ")}. ` + (r.recommendedN ? `V(${r.recommendedN}/${r.recommendedN + 1}) is below 0.15, so the ${r.recommendedN} most stable genes are enough (${g.ranking.slice(0, r.recommendedN).join(", ")}).` : "No pairwise variation is below 0.15: with these candidates, more references (or better ones) would be needed for a stable normalisation factor.")),
+      tbl(["Rank", "Gene", "M (all candidates)", "M when it was dropped"], g.ranking.map((x, i) => h("tr", null, h("td", { class: "num" }, i + 1), h("td", null, x), h("td", { class: "num" }, fmt(M0[x], 3)),
+        h("td", { class: "num" }, (() => { const stp = g.steps.find(st2 => st2.excluded === x); return stp ? fmt(stp.M[x], 3) : "kept to the end"; })())))),
+      h("p", { class: "fine" }, "Lower M = more stable. Rough guide (Hellemans et al. 2007): M below 0.5 in fairly homogeneous samples, below 1 in heterogeneous ones."),
+      tbl(["Pairwise variation", "V"], Vs.map(v => h("tr", { class: v.value < 0.15 ? "diff" : "" }, h("td", null, `V${v.label} (adding gene ${v.n + 1})`), h("td", { class: "num" }, fmt(v.value, 3))))),
+      h("p", { class: "fine" }, "V(n/n+1) is how much the normalisation factor changes when the next gene is added; below 0.15 means the extra gene isn't needed (Vandesompele et al. 2002)."));
+  }
+  if (r.normfinder) {
+    const n = r.normfinder, genes = r.candidates;
+    if (n.rho) {
+      const order = genes.map((g2, j) => [g2, n.rho[j]]).sort((p, q) => p[1] - q[1]);
+      out.push(h("h3", null, `NormFinder (${n.groups.length} groups: ${n.groups.join(", ")})`),
+        h("p", null, `Most stable gene: ${order[0][0]}. Best pair: ${n.bestPair.map(j => genes[j]).join(" and ")} (combined stability ${fmt(n.bestPairRho, 3)}).`),
+        tbl(["Rank", "Gene", "Stability ρ"], order.map(([g2, v], i) => h("tr", null, h("td", { class: "num" }, i + 1), h("td", null, g2), h("td", { class: "num" }, fmt(v, 3))))),
+        h("p", { class: "fine" }, "Lower ρ = more stable; ρ combines the gene's variation within groups and its systematic shift between groups (Andersen et al. 2004)."));
+    } else out.push(h("h3", null, "NormFinder"), h("p", { class: "fine" }, "Only one group, so NormFinder gives within-group variances only (no shift between groups)."),
+      tbl(["Gene", "Variance"], genes.map((g2, j) => [g2, n.variance[j]]).sort((p, q) => p[1] - q[1]).map(([g2, v]) => h("tr", null, h("td", null, g2), h("td", { class: "num" }, fmt(v, 4))))));
+  }
+  out.push(h("p", { class: "fine" }, `${r.units.length} biological units, technical replicates averaged; ${Object.keys(eff).length ? `efficiency-corrected (${Object.entries(eff).map(([t, e]) => `${t} ${fmt((e - 1) * 100, 1)}%`).join(", ")})` : "100% efficiency assumed"}. Same calculations as NormqPCR (Perkins et al. 2012) selectHKs, checked against it.`));
+  return card(...out);
 }
 
 // ---------------------------------------------------------------- [gsea] gene set enrichment

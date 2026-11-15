@@ -5,6 +5,7 @@ import {
 } from "./core.js";
 import { CREDIT } from "./credit.js";
 import * as Q from "./absquant.js"; // absolute quantity of unknowns
+import * as RG from "./refgenes.js"; // reference-gene stability (geNorm, NormFinder)
 import { analysisReportHtml, analysisResultsHtml, analysisReferences } from "./analysis.js"; // analysis module
 import { assayReportHtml } from "./assays.js"; // assay types: workstream 4
 import { targetsReportHtml } from "./genes.js"; // genes and RNA types per target
@@ -124,6 +125,7 @@ ${table(["Biological unit", "Group", "Target", "Wells", "Ct/Cq as exported", "Me
 <p class="sub small">Wells sharing a biological unit and target. They are technical repeats, not separate biological samples. Biological units per group: ${esc(res.bioSummary.map(b => `${b.group || "no group"} / ${b.target}: ${b.units.length}`).join("; ") || "none")}.</p>
 
 ${analysisReportHtml(exp, res, esc) /* analysis module: empty unless switched on */}
+${(() => { if (!exp.analysis?.on) return ""; const t = RG.summaryText(RG.forRun(res, exp.analysis).r); return t ? `<h3>Reference gene stability</h3><p>${esc(t)}</p>` : ""; })() /* geNorm / NormFinder (web/refgenes.js) */}
 ${exp.assaySetup?.type ? assayReportHtml(exp, res.rows, esc, res.stdCurves) /* workstream 4; stdCurves: per-target efficiency for assay ratios */ : ""}
 
 ${res.stdCurves.length ? `<h2>Standard curves</h2>${table(["Target", "Efficiency", "95% CI of efficiency", "R²", "Slope", "Intercept", "Levels"], res.stdCurves.map(c => { const d = Q.curveDetails(c);
