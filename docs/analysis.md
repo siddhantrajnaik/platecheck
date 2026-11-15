@@ -148,6 +148,24 @@ python -m venv /tmp/platecheck-statsref
 
 The file in the repository was made with SciPy 1.18.1, NumPy 2.5.4, statsmodels 0.15.0 and pingouin 0.7.0 (Python 3.14). The new cases use their own random seed, so every earlier case in the file is byte for byte the same as before.
 
+## Absolute quantity from a standard curve
+
+When a target has a standard curve on the plate (Standard wells with quantities), every unknown of that target (Sample and positive-control wells) is read off the curve, per biological unit. Shown on the Review page under Standard curves, in the report, and as a CSV (one row per unit, one per well, and the curve statistics). Code: `web/absquant.js`. MIQE 2.0 asks for the method of quantity calculation, the efficiency's confidence interval and the prediction interval of interpolated quantities; this gives all three.
+
+    curve:       Ct = b + m · x,  x = log10 quantity, fitted to the n standard wells (least squares)
+    quantity:    x̂ = (ȳ0 − b) / m, quantity = 10^x̂        ȳ0 = mean Ct of the unknown's k wells with a Ct
+    interval:    x̂ ± t(0.975, n − 2) · (s / |m|) · √(1/k + 1/n + (ȳ0 − ȳ)² / (m² · Sxx))       (Massart et al. 1997)
+    efficiency:  E = 10^(−1/m) − 1, 95% CI from the slope's CI m ± t(0.975, n − 2) · s / √Sxx
+
+s is the residual SD of the curve, ȳ the mean Ct of the standards and Sxx the sum of squares of their log10 quantities about their mean. The interval is the prediction interval for a new measurement: it includes the scatter of the standards around the curve and the uncertainty of the curve itself, and narrows with more replicate wells (k). It is worked out on the log scale and transformed back, so it isn't symmetric around the quantity.
+
+- **Quantity at the mean Ct vs mean of well quantities.** The quantity at the mean Ct is the geometric mean of the wells' quantities and is what the interval belongs to. QuantStudio's "Quantity Mean" (and many papers) take the arithmetic mean of the wells' quantities instead, which is never smaller; it is shown in its own column so results can be matched with the instrument.
+- **Outside the standards.** An unknown whose quantity is below the lowest or above the highest standard is marked "extrapolated" and listed in a warning; the number is still given.
+- **No Ct.** A unit with no Ct in any well is "not detected"; wells without a Ct among others with one are left out and counted.
+- **Units** are those of the standards' Quantity column (copies, ng …); PlateCheck doesn't convert them.
+
+**Checked against:** R 4.3.2 `lm()` / `confint()` and chemCal 0.2.3 `inverse.predict()` on the same data (curve statistics to 1e-10, quantities and interval limits to 1e-9 on the log scale; `tests/absquant.test.mjs`), and a real QuantStudio run (Figshare 30833918): all 72 unknown wells' quantities equal QuantStudio's own Quantity column (largest difference 0.011%, from QuantStudio's rounded slope and intercept), the residual SD and slope standard error equal its "Standard Deviation" and "Standard Error" columns, and the authors' published molecules per reaction equal QuantStudio's mean of well quantities.
+
 ## Reference gene check
 
 For each chosen reference I compare its mean Ct between groups (units averaged first). It is flagged when
@@ -336,6 +354,7 @@ When the analysis is on, the HTML report gets an Analysis section: the method in
 
 ## References
 
+- Massart DL, Vandeginste BGM, Buydens LMC, de Jong S, Lewi PJ, Smeyers-Verbeke J (1997). *Handbook of Chemometrics and Qualimetrics, Part A*. Elsevier, Amsterdam; inverse prediction from a calibration line, p. 200 (the formula R's chemCal::inverse.predict implements).
 - Livak KJ, Schmittgen TD (2001). Analysis of relative gene expression data using real-time quantitative PCR and the 2^−ΔΔCT method. *Methods* 25(4):402–408. doi:10.1006/meth.2001.1262
 - Pfaffl MW (2001). A new mathematical model for relative quantification in real-time RT-PCR. *Nucleic Acids Research* 29(9):e45. doi:10.1093/nar/29.9.e45
 - Vandesompele J, De Preter K, Pattyn F, Poppe B, Van Roy N, De Paepe A, Speleman F (2002). Accurate normalization of real-time quantitative RT-PCR data by geometric averaging of multiple internal control genes. *Genome Biology* 3(7):research0034. doi:10.1186/gb-2002-3-7-research0034

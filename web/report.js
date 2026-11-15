@@ -4,6 +4,7 @@ import {
   FORMATS, FIELD_LABEL, CONTEXT_FIELDS, RULESET_FIELDS, REFERENCES, rulesetId, rulesetChanges, referencesFor, toCsv, reviewOf,
 } from "./core.js";
 import { CREDIT } from "./credit.js";
+import * as Q from "./absquant.js"; // absolute quantity of unknowns
 import { analysisReportHtml, analysisResultsHtml, analysisReferences } from "./analysis.js"; // analysis module
 import { assayReportHtml } from "./assays.js"; // assay types: workstream 4
 import { targetsReportHtml } from "./genes.js"; // genes and RNA types per target
@@ -20,6 +21,14 @@ export const LIMITATIONS = [
   "No wells or values were removed or changed. Plate-map edits only change labels, and the original values are listed above.",
 ];
 
+// Absolute quantity of the unknowns (web/absquant.js), as in the app's Review page.
+function absQuantHtml(res) {
+  const q = Q.quantify(res.rows, res.stdCurves);
+  if (!q.units.length) return "";
+  return `<h3>Absolute quantity of unknowns</h3><p class="sub">Read off each target's standard curve at the mean Ct of the replicate wells, in the standards' units, with a 95% prediction interval (Massart et al. 1997). "Mean of well quantities" is QuantStudio's Quantity Mean, for comparison.</p>${q.warnings.map(w => `<p class="sub">${esc(w)}</p>`).join("")}`
+    + table(["Target", "Biological unit", "Wells", "Mean Ct", "Quantity", "95% prediction interval", "Mean of well quantities", "Note"],
+      q.units.map(u => [u.target, u.unit, `${u.n}/${u.wells.length}`, num(u.meanCt), Q.fmtQ(u.q), u.qLow == null ? "—" : `${Q.fmtQ(u.qLow)} – ${Q.fmtQ(u.qHigh)}`, Q.fmtQ(u.qWellMean), u.note]));
+}
 function table(head, rows, cls = "") {
   if (!rows.length) return `<p class="sub">None.</p>`;
   const body = rows.map(r => `<tr>${r.map(c => `<td>${esc(c)}</td>`).join("")}</tr>`).join("");
@@ -117,7 +126,8 @@ ${table(["Biological unit", "Group", "Target", "Wells", "Ct/Cq as exported", "Me
 ${analysisReportHtml(exp, res, esc) /* analysis module: empty unless switched on */}
 ${exp.assaySetup?.type ? assayReportHtml(exp, res.rows, esc, res.stdCurves) /* workstream 4; stdCurves: per-target efficiency for assay ratios */ : ""}
 
-${res.stdCurves.length ? `<h2>Standard curves</h2>${table(["Target", "Efficiency", "R²", "Slope", "Intercept", "Levels"], res.stdCurves.map(c => [c.target, num(c.efficiency, 1) + "%", num(c.r2, 4), num(c.slope, 3), num(c.intercept), c.levels]))}` : ""}
+${res.stdCurves.length ? `<h2>Standard curves</h2>${table(["Target", "Efficiency", "95% CI of efficiency", "R²", "Slope", "Intercept", "Levels"], res.stdCurves.map(c => { const d = Q.curveDetails(c);
+  return [c.target, num(c.efficiency, 1) + "%", d?.effLow != null ? `${num(d.effLow, 1)}–${num(d.effHigh, 1)}%` : "—", num(c.r2, 4), num(c.slope, 3), num(c.intercept), c.levels]; }))}${absQuantHtml(res)}` : ""}
 
 <h2>Plate map</h2>
 ${table(["Well", "Sample", "Target", "Group", "Role", "Biological unit", "Quantity", "Ct/Cq as exported", "Changed from file"], res.rows.map(r => {

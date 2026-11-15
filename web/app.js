@@ -4,6 +4,7 @@ import * as R from "./report.js";
 import * as S from "./store.js";
 import { demoFiles, DEMO_CONTEXT, DEMO_TITLE } from "./demo.js";
 import { plot } from "./charts.js";
+import * as Q from "./absquant.js"; // absolute quantity of unknowns from the standard curves
 import { CREDIT } from "./credit.js";
 import { readWorkbook } from "./excel.js";
 import { evidenceNote, variabilityCard } from "./ui-variability.js"; // thresholds workstream
@@ -953,15 +954,35 @@ VIEWS.findings = () => {
     // Thresholds workstream: technical vs biological spread graphs (web/ui-variability.js).
     variabilityCard(res, st.exp.ruleset.values.sdThreshold, fn => after.push(fn)),
     res.stdCurves.length > 0 && card(h("h2", null, "Standard curves"), res.stdCurves.map(c => {
-      const cv = h("canvas", { class: "chart", role: "img", "aria-label": `Standard curve for ${c.target}` });
+      const cv = h("canvas", { class: "chart", role: "img", "aria-label": `Standard curve for ${c.target}` }), d = Q.curveDetails(c);
       after.push(() => plot(cv, { points: c.points.map(p => ({ x: p.x, y: p.y })), line: c, xLabel: "log10 quantity", yLabel: "Ct/Cq" }));
-      return h("figure", null, cv, h("figcaption", null, `${c.target}: efficiency ${fmt(c.efficiency, 1)}%, R² ${fmt(c.r2, 4)}, slope ${fmt(c.slope, 3)}, ${c.levels} levels.`));
+      return h("figure", null, cv, h("figcaption", null, `${c.target}: efficiency ${fmt(c.efficiency, 1)}%` + (d?.effLow != null ? ` (95% CI ${fmt(d.effLow, 1)}–${fmt(d.effHigh, 1)}%)` : "")
+        + `, R² ${fmt(c.r2, 4)}, slope ${fmt(c.slope, 3)}, ${c.levels} levels, ${c.points.length} wells.`));
     })),
+    absQuantCard(res),
     card(h("h2", null, "Was this useful?"),
       h("p", { class: "lede" }, "Your answer stays with this experiment. Nothing gets sent to me; if you want to tell me something, email me."),
       h("div", { class: "seg", role: "group", "aria-label": "Usefulness" }, ["Yes", "Partly", "No"].map(v => h("button", { type: "button", class: fb === v ? "on" : "", "aria-pressed": String(fb === v),
         onclick: () => change("feedback", `Usefulness: ${v}`, () => (st.exp.feedback = { value: v, by: actor(), at: new Date().toISOString() })) }, v))))];
 };
+
+// Absolute quantity of the unknowns, read off each target's standard curve (web/absquant.js). Shown only when a
+// target has a curve and unknown wells; intervals are 95% prediction intervals.
+function absQuantCard(res) {
+  if (!res.stdCurves?.length) return null;
+  const q = Q.quantify(res.rows, res.stdCurves);
+  if (!q.units.length) return null;
+  const pi = u => (u.qLow == null ? "—" : `${Q.fmtQ(u.qLow)} – ${Q.fmtQ(u.qHigh)}`);
+  return card(h("h2", null, "Absolute quantity"),
+    h("p", { class: "lede" }, "Each unknown read off its target's standard curve, in the same units as the standards' quantities. The quantity is taken at the mean Ct of its replicate wells, with a 95% prediction interval that includes the scatter of the standards around the curve. QuantStudio's \"Quantity Mean\" averages the wells' quantities instead; that value is in the last column, for comparison."),
+    q.warnings.map(w => h("p", { class: "warn-line" }, w)),
+    h("div", { class: "tablewrap" }, h("table", { class: "tbl" },
+      h("thead", null, h("tr", null, ["Target", "Biological unit", "Wells", "Mean Ct", "Quantity", "95% prediction interval", "Mean of well quantities", "Note"].map(x => h("th", null, x)))),
+      h("tbody", null, q.units.map(u => h("tr", { class: u.extrapolated ? "flag" : "" }, h("td", null, u.target), h("td", null, u.unit), h("td", { class: "num" }, `${u.n}/${u.wells.length}`),
+        h("td", { class: "num" }, fmt(u.meanCt, 2)), h("td", { class: "num" }, Q.fmtQ(u.q)), h("td", { class: "num" }, pi(u)), h("td", { class: "num" }, Q.fmtQ(u.qWellMean)), h("td", null, u.note)))))),
+    h("p", { class: "fine" }, "Method: quantity = 10^((Ct − intercept) / slope); interval from the inverse-regression formula (Massart et al. 1997), checked against R's chemCal::inverse.predict and against QuantStudio's own quantities."),
+    h("div", { class: "row" }, h("button", { class: "btn", type: "button", onclick: () => download(`${st.exp.id}-quantities.csv`, Q.quantCsv(q, C.toCsv), "text/csv") }, "Download quantities (CSV)")));
+}
 
 // ---------------------------------------------------------------- Analysis (workstream 2; the views are in ui-analysis.js)
 const AX = () => ({ h, card, download, change, renderMain, st, flash, S, C, openExp, goTab });
