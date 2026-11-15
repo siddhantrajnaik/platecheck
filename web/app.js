@@ -80,9 +80,10 @@ async function readText(file) { return C.decodeBytes(await file.arrayBuffer()); 
 // with its sheets already sorted into results, amplification and melt; anything else gives { binary }.
 async function readAny(file) {
   const buf = await file.arrayBuffer(), d = C.decodeBytes(buf);
-  if (!d.binary || d.binary === "unknown") return d;
-  // RDML (a zip with rdml_data.xml) reads like a workbook: each run is a "sheet" with results, curves and melt.
-  if (/\.rdml$/i.test(file.name)) {
+  // RDML (a zip with rdml_data.xml, or that XML on its own) reads like a workbook: each run is a "sheet" with results, curves and melt.
+  const rdmlText = !d.binary && /<rdml[\s>]/.test(String(d.text || "").slice(0, 4000));
+  if (!rdmlText && (!d.binary || d.binary === "unknown")) return d;
+  if (/\.rdml$/i.test(file.name) || rdmlText) {
     const rdml = await readRdml(file.name, buf).catch(err => ({ error: err }));
     if (rdml && !rdml.error) return { workbook: rdml };
     return { binary: true, message: `this .rdml file couldn't be read (${rdml?.error?.message || "it isn't an RDML zip"}).` };
@@ -90,7 +91,7 @@ async function readAny(file) {
   const workbook = await readWorkbook(file.name, buf).catch(() => null) || await readRdml(file.name, buf).catch(() => null);
   return workbook ? { workbook } : d;
 }
-const ACCEPT = ".csv,.txt,.tsv,.xlsx,.xls,.ods,.rdml,text/csv,text/plain,text/tab-separated-values";
+const ACCEPT = ".csv,.txt,.tsv,.xlsx,.xls,.ods,.rdml,.xml,text/csv,text/plain,text/tab-separated-values";
 const noExt = n => n.replace(/\.(csv|txt|tsv|xlsx|xls|ods|rdml)$/i, "");
 function download(name, text, type) {
   const url = URL.createObjectURL(new Blob([text], { type }));
@@ -784,7 +785,7 @@ VIEWS.context = () => {
               h("button", { class: "btn", type: "button", onclick: () => setNA(c.role, c.target, reason.value) }, c.na ? "Update" : "Mark N/A"),
               c.na && h("button", { class: "btn", type: "button", onclick: () => setNA(c.role, c.target, null) }, "Clear")) : ""));
         })))) : h("p", { class: "muted" }, "Import results to see controls per target."),
-      h("p", { class: "fine" }, "Set which controls you expect in the rule set above, and mark control wells on the Plate map tab."))];
+      h("p", { class: "fine" }, "Set which controls you expect in the rule set above, and mark control wells on the Plate step."))];
 };
 
 // ---------------------------------------------------------------- 5 · Findings (FR-10..FR-18)
@@ -1027,9 +1028,9 @@ function linregCard(res) {
         h("thead", null, h("tr", null, ["Well", "Sample", "Target", "Efficiency", "R²", "Points", "Cq (LinRegPCR)", "Cq (instrument)", "N0", "Used for mean", "Notes"].map(x => h("th", null, x)))),
         h("tbody", null, L.rows.map(w => { const why = LR.whyNotUsed(w);
           return h("tr", { class: "click", tabindex: 0, onclick: () => { st.selFinding = null; st.sel = new Set([C.wellKey(w.key)].filter(Boolean)); renderMain(); } },
-            h("td", null, w.key), h("td", null, w.sample), h("td", null, w.target), h("td", { class: "num" }, w.eff == null ? "—" : fmt(w.eff, 3)), h("td", { class: "num" }, w.r2 == null ? "—" : fmt(w.r2, 4)),
+            h("td", null, w.key), h("td", null, w.sample), h("td", null, w.target), h("td", { class: "num" }, w.eff == null ? "—" : `${fmt(w.eff, 3)} (${pct(w.eff)})`), h("td", { class: "num" }, w.r2 == null ? "—" : fmt(w.r2, 4)),
             h("td", { class: "num" }, w.nIncluded), h("td", { class: "num" }, w.cq == null ? "—" : fmt(w.cq, 2)), h("td", { class: "num" }, w.instrumentCt == null ? "—" : fmt(w.instrumentCt, 2)),
-            h("td", { class: "num" }, w.n0 == null ? "—" : w.n0.toExponential(2)), h("td", null, why || "yes"), h("td", null, [...w.excl, ...w.notes].join("; ")));
+            h("td", { class: "num" }, w.n0 == null ? "—" : w.n0.toExponential(2)), h("td", null, why || "yes"), h("td", null, [...w.excl, ...w.notes].map(LR.noteText).join("; ")));
         }))))),
     h("p", { class: "fine" }, "Method: Ruijter et al. (2009) Nucleic Acids Res 37:e45; Untergasser et al. (2021) BMC Bioinformatics 22:398. Ported from rdmlpython 1.7.2 (MIT licence) and checked against it on 1,976 reactions from the RDML example files: every efficiency, Cq and N0 agrees to 12 or more significant digits."),
     h("div", { class: "row" }, h("button", { class: "btn", type: "button", onclick: () => download(`${st.exp.id}-linregpcr.csv`, LR.linregCsv(L, C.toCsv), "text/csv") }, "Download per-well efficiency (CSV)")));
@@ -1042,7 +1043,7 @@ VIEWS.analysis = () => analysisView(AX());
 // ---------------------------------------------------------------- 6 · Report & export (FR-19..FR-21)
 VIEWS.report = () => {
   if (!st.res) return [emptyCard("Upload a results file first, then come back here for the report.", "data")];
-  const base = (st.exp.title || st.exp.id).replace(/[^\w.-]+/g, "_").slice(0, 60) || st.exp.id;
+  const base = (st.exp.title || st.exp.id).replace(/[^\w.-]+/g, "_").slice(0, 60).replace(/^_+|_+$/g, "") || st.exp.id; // no stray "_" from a closing bracket
   const frame = h("iframe", { class: "report-frame", sandbox: "allow-same-origin allow-modals", title: "Report preview" });
   frame.srcdoc = R.reportHtml(st.exp, st.res);
   const log = (what, name, rerender = false) => change("export", `${what}: ${name}`, null, { rerender });
@@ -1062,8 +1063,8 @@ VIEWS.report = () => {
       h("details", { class: "other-formats" }, h("summary", null, "Other formats"),
         h("div", { class: "exports" },
           box("Report (HTML)", "The same report as a web page. Opens in any browser; print it from there if you need paper.", "Download HTML", go("Report", `${base}-report.html`, () => R.reportHtml(st.exp, st.res), "text/html", true)),
-          box("Well data (CSV)", "Every well with its labels and the values exactly as exported.", "Download CSV", go("Well data", `${base}-wells.csv`, () => R.wellsCsv(st.res), "text/csv")),
-          box("Flags (CSV)", "One row per flag with the evidence and your decision.", "Download CSV", go("Findings", `${base}-flags.csv`, () => R.findingsCsv(st.exp, st.res), "text/csv")),
+          box("Well data (CSV)", "Every well with its labels and the values exactly as exported.", "Download well data (CSV)", go("Well data", `${base}-wells.csv`, () => R.wellsCsv(st.res), "text/csv")),
+          box("Flags (CSV)", "One row per flag with the evidence and your decision.", "Download flags (CSV)", go("Findings", `${base}-flags.csv`, () => R.findingsCsv(st.exp, st.res), "text/csv")),
           box("RDML", "The run in the standard qPCR data format (RDML 1.3: plate, samples, targets, Cq and raw curves), for RDML-Tools, LinRegPCR and other qPCR software.", "Download RDML", async () => {
             const name = `${base}.rdml`, notes = rdmlNotes(st.exp, st.res);
             download(name, await rdmlZip(st.exp, st.res), "application/zip"); log("RDML", name, true);

@@ -4,13 +4,13 @@ Status of each requirement in [prd.md](prd.md). “Built” means implemented an
 
 | Req | Priority | Status | Where |
 |---|---|---|---|
-| FR-1 Create and name an experiment | P0 | Built | Setup tab; `newExperiment` |
-| FR-2 Import a qPCR file, keep original unchanged | P0 | Built | Data tab; original text and SHA-256 stored; “Download original” |
+| FR-1 Create and name an experiment | P0 | Built | Upload step; `newExperiment` |
+| FR-2 Import a qPCR file, keep original unchanged | P0 | Built | Upload step; original text and SHA-256 stored; “Download original” |
 | FR-3 Show parser results before analysis | P0 | Built | Import preview with column mapping, counts, roles, warnings; explicit confirm |
-| FR-4 Define or confirm the plate map | P0 | Built | Plate map tab: grid selection, bulk edit, per-row edit, template import/export |
+| FR-4 Define or confirm the plate map | P0 | Built | Plate step: grid selection, bulk edit, per-row edit, template import/export |
 | FR-5 Replicate hierarchy | P0 | Built | Biological unit vs technical group; units default to sample name and this is flagged |
-| FR-6 Protocol and run context | P0 | Built | Context tab; missing optional context reported as “not provided” |
-| FR-7 Compare runs | P1 | Built | Compare runs tab; `compareRuns` |
+| FR-6 Protocol and run context | P0 | Built | More → Method details and thresholds; missing optional context reported as “not provided” |
+| FR-7 Compare runs | P1 | Built | More → Compare with another run; `compareRuns` |
 | FR-8 Structural checks | P0 | Built | 11 structure rules incl. malformed rows, duplicates, unmapped wells, template coverage |
 | FR-9 Expected controls, mark not applicable | P0 | Built | NTC / positive / no-RT expectations per rule set; N/A with reason |
 | FR-10 Technical replicate behaviour | P0 | Built | SD per group, configurable threshold, nothing removed |
@@ -22,7 +22,7 @@ Status of each requirement in [prd.md](prd.md). “Built” means implemented an
 | FR-16 Rule-set profiles | P1 | Built | Saved profiles with versions; experiments keep a snapshot |
 | FR-17 Experiment summary | P0 | Built | Status labels, counts by severity and category; no score |
 | FR-18 Link findings to data | P0 | Built | Selecting a finding highlights wells on the plate and their curves |
-| FR-19 Export a report | P0 | Built | HTML report; print to PDF |
+| FR-19 Export a report | P0 | Built | PDF report (A4, watermark while flags are open) and HTML report |
 | FR-20 Export structured results | P0 | Built | Wells CSV, findings CSV, results JSON |
 | FR-21 Experiment packet | P1 | Built | JSON packet with original files; checksum-verified import |
 | FR-22 Protect experiment data | P0 | Partial | Local-only processing and storage, documented in PRIVACY.md. No encryption at rest or collaborator access control. |

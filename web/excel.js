@@ -30,8 +30,10 @@ function sheetText(X, ws) {
   for (let R = r.s.r; R <= r.e.r; R++) {
     const row = [];
     for (let C = r.s.c; C <= r.e.c; C++) row.push(cellText(X, ws[X.utils.encode_cell({ r: R, c: C })]));
-    while (row.length && row[row.length - 1] === "") row.pop();
-    if (row.length) lines.push(row.join("\t"));
+    // Table rows keep their empty trailing cells, so a well whose last column (CFX Cq) is empty doesn't look like a
+    // cut-off line; short metadata rows ("Run date", value) are trimmed as before.
+    if (row.filter(c => c !== "").length < 3) while (row.length && row[row.length - 1] === "") row.pop();
+    if (row.some(c => c !== "")) lines.push(row.join("\t"));
   }
   return lines.join("\n");
 }

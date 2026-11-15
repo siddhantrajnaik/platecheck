@@ -99,14 +99,19 @@ export function rdmlRuns(xml) {
   return { version: doc.attrs.version || "", runs };
 }
 
-// Reads a dropped .rdml file. Returns null when the bytes aren't an RDML zip. Same shape as excel.js readWorkbook:
-// { best: { results, amp, melt }, all: [...] }, each item { name, text, kind, parsed, workbook: { name, sheet, sha256 } }.
+// Reads a dropped .rdml file: the usual zip, or its rdml_data.xml on its own. Returns null when the bytes aren't RDML;
+// throws, with a message for the user, when they are RDML but hold nothing PlateCheck can read. Same shape as excel.js
+// readWorkbook: { best: { results, amp, melt }, all: [...] }, each item { name, text, kind, parsed, workbook: { name, sheet, sha256 } }.
 export async function readRdml(name, bytes) {
   const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  if (b[0] !== 0x50 || b[1] !== 0x4b) return null; // not a zip
-  const X = await load();
   let xml;
-  try { const z = X.CFB.read(b, { type: "array" }), e = z.FileIndex.find(f => /\.xml$/i.test(f.name) && f.content?.length); xml = e && new TextDecoder().decode(e.content); } catch { return null; }
+  if (b[0] !== 0x50 || b[1] !== 0x4b) { // not a zip: maybe the XML itself
+    if (!/<rdml[\s>]/.test(new TextDecoder().decode(b.subarray(0, 4000)))) return null;
+    xml = new TextDecoder().decode(b);
+  } else {
+    const X = await load();
+    try { const z = X.CFB.read(b, { type: "array" }), e = z.FileIndex.find(f => /\.xml$/i.test(f.name) && f.content?.length); xml = e && new TextDecoder().decode(e.content); } catch { return null; }
+  }
   if (!xml || !/<rdml[\s>]/.test(xml.slice(0, 2000))) return null;
   const doc = rdmlRuns(xml), sha = [...new Uint8Array(await crypto.subtle.digest("SHA-256", b))].map(x => x.toString(16).padStart(2, "0")).join(""); // the .rdml file itself
   const all = [], best = {};
@@ -214,6 +219,8 @@ export function rdmlNotes(exp, res) {
   if (text.length) notes.push(`${text.length} Cq value(s) that weren't numbers were left out (${text.slice(0, 5).map(r => `${r.key} “${r.ct}”`).join(", ")}); RDML holds numeric Cq only.`);
   const seen = new Set(), dup = kept.filter(r => { const k = `${r.key}|${r.target || r.fluor || ""}`; if (seen.has(k)) return true; seen.add(k); return false; });
   if (dup.length) notes.push(`${dup.length} duplicate result(s) for the same target in one well were left out (${dup.slice(0, 5).map(r => `${r.key} ${r.target}, line ${r.line}`).join("; ")}); RDML holds one result per target per well, so the first was written.`);
+  const used = new Set(kept.map(r => r.ampKey || `${r.key}|${r.target ?? ""}`)), lone = Object.keys(res?.amp?.series || {}).filter(k => !used.has(k));
+  if (lone.length) notes.push(`${lone.length} amplification curve(s) have no well in the results file and were left out (${lone.slice(0, 5).map(k => k.split("|").filter(Boolean).join(" ")).join(", ")}).`);
   if (exp.melt && exp.melt.valueType !== "fluorescence") notes.push("The melt curves are derivative values; RDML holds raw melt fluorescence, so they weren't included.");
   return notes;
 }

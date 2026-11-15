@@ -166,7 +166,7 @@ I did not raise this default to 4 or 5, because it would stop PlateCheck from re
 
 ## RNA-type notes (no setting)
 
-**What PlateCheck does.** It takes each target's RNA type from the Genes step, or guesses it from the name when you haven't set one (the finding says which), and adds three low-severity notes. Each target is reported by at most one of the two miRNA notes.
+**What PlateCheck does.** It takes each target's RNA type from the Targets panel (More, then Method details and thresholds), or guesses it from the name when you haven't set one (the finding says which), and adds three low-severity notes. Each target is reported by at most one of the two miRNA notes.
 
 - **Target and reference of different RNA types.** With the Analysis step on, a miRNA target normalised to an mRNA reference gene, or an mRNA target normalised to a miRNA or snoRNA/snRNA reference.
 - **miRNA targets without a small-RNA reference.** miRNA targets on the plate, no snoRNA or snRNA target, and no miRNA or small RNA chosen as reference in Analysis. Choosing a stable miRNA or a spike-in such as cel-miR-39 as reference clears it.
@@ -174,7 +174,7 @@ I did not raise this default to 4 or 5, because it would stop PlateCheck from re
 
 **Literature.** Schwarzenbach et al. review miRNA normalisation; they note that reference genes of the same RNA class are preferred, and that RNU6, the most used small-RNA reference, was unstable in several of the studies they review [11]. A miRNA and an mRNA are also usually reverse transcribed differently (stem-loop or poly(A) RT against oligo-dT or random primers). In GENCODE the most common lncRNA transcript has two exons, against four for protein-coding transcripts [12], so lncRNA primers often cannot span an exon junction; MIQE asks for a no-RT control at least for new RNA preps [1, 2].
 
-**Exceptional data.** If your miRNA reference is on another plate, choose it in Analysis when you combine plates. If the type guessed from a name is wrong, correct it in the Genes step.
+**Exceptional data.** If your miRNA reference is on another plate, choose it in Analysis when you combine plates. If the type guessed from a name is wrong, correct it in the Targets panel (More, then Method details and thresholds).
 
 ## Expected controls
 

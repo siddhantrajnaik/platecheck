@@ -367,7 +367,7 @@ export function analysisView(ax) {
     h("button", { class: "btn primary", type: "button", onclick: () => set({ on: true }, "Analysis switched on") }, "Switch on the analysis"),
     h("p", { class: "fine" }, "Several plates from one experiment? Use “Combine plates” in the sidebar."))];
   const a = A.analyzeRun(st.exp, st.res, s);
-  const base = (st.exp.title || st.exp.id).replace(/[^\w.-]+/g, "_").slice(0, 60) || "run";
+  const base = (st.exp.title || st.exp.id).replace(/[^\w.-]+/g, "_").slice(0, 60).replace(/^_+|_+$/g, "") || "run";
   return [card(h("h2", null, "Analysis settings"),
       settingsPanel(ax, s, { targets: ch.targets, groups: ch.groups, hasCurves: (st.res.stdCurves || []).length > 0, hasAmp: !!st.res.amp }, set),
       h("div", { class: "row" }, h("button", { class: "btn", type: "button", onclick: () => set({ on: false }, "Analysis switched off") }, "Switch the analysis off"))),
@@ -597,7 +597,7 @@ export function studyView(ax) {
   if (!runs.length) return out;
   out.push(card(h("h2", null, "Analysis settings"), settingsPanel(ax, sd.settings, info, patch => save({ settings: { ...sd.settings, ...patch, on: true } }))));
   const a = A.analyzeStudy(runs, sd);
-  const base = sd.title.replace(/[^\w.-]+/g, "_").slice(0, 60) || "study";
+  const base = sd.title.replace(/[^\w.-]+/g, "_").slice(0, 60).replace(/^_+|_+$/g, "") || "study";
   const reportBtn = card(h("h2", null, "Study report"),
     h("p", { class: "lede" }, "One HTML file with the method, the plates, the correction used and its warnings, the results table, the graphs and the references. Open it in any browser or print it to PDF."),
     h("div", { class: "row" }, h("button", { class: "btn primary", type: "button", onclick: () => {

@@ -7,7 +7,7 @@ import {
   RULESET_FIELDS, REFERENCES, rulesetChanges, referencesFor, reviewOf, wellKey,
 } from "./core.js";
 import { CREDIT } from "./credit.js";
-import { LIMITATIONS, esc, missingGroups } from "./report.js";
+import { LIMITATIONS, esc, missingGroups, methodRefs } from "./report.js";
 import * as Q from "./absquant.js";
 import * as RG from "./refgenes.js";
 import { analysisReportHtml } from "./analysis.js";
@@ -233,7 +233,7 @@ export function reportPdfDoc(exp, res, { generatedAt = new Date().toISOString() 
 
     heading("References", sec),
     { text: "Sources for the thresholds above and for the checks that raised a flag. The reasoning behind each number is in docs/thresholds.md in the PlateCheck repository.", style: "muted", margin: [0, 0, 0, 4] },
-    { ol: referencesFor(res.findings).map(r => ({ text: [r.text, " ", { text: `doi:${r.doi}`, link: `https://doi.org/${r.doi}`, color: ACCENT }] })), fontSize: 7.5, margin: [0, 0, 0, 8] },
+    { ol: referencesFor(res.findings, methodRefs(exp, res)).map(r => ({ text: [r.text, ...(r.doi ? [" ", { text: `doi:${r.doi}`, link: `https://doi.org/${r.doi}`, color: ACCENT }] : [])] })), fontSize: 7.5, margin: [0, 0, 0, 8] },
 
     heading("Limits of this report", sec),
     bullets(LIMITATIONS),

@@ -22,12 +22,14 @@ test("rule references resolve and every reference is complete", () => {
   for (const k of ["replicate_dispersion", "ntc_amplification", "nrt_amplification", "std_curve_efficiency", "std_curve_r2", "melt_tm_deviation", "melt_multiple_peaks", "amp_ct_inconsistent"])
     assert.ok(C.RULES[k].refs?.length && C.RULES[k].evidence, `${k} has evidence`);
   for (const [k, r] of Object.entries(C.REFERENCES)) {
-    assert.match(r.doi, /^10\.\d{4,}\/\S+$/, `${k}: doi`);
+    if (r.doi) assert.match(r.doi, /^10\.\d{4,}\/\S+$/, `${k}: doi`);
+    else assert.match(r.text, /Elsevier|Wiley|Springer|Press/, `${k}: a book without a DOI names its publisher`);
     assert.match(r.text, /\b(19|20)\d\d\b/, `${k}: year in text`);
     assert.ok(r.short, `${k}: short label`);
   }
   // No reference sits unused.
-  const used = new Set([...C.RULESET_FIELDS.flatMap(f => f.refs), ...Object.values(C.RULES).flatMap(r => r.refs || [])]);
+  const used = new Set([...C.RULESET_FIELDS.flatMap(f => f.refs), ...Object.values(C.RULES).flatMap(r => r.refs || []),
+    "massart1997", "vandesompele2002", "andersen2004"]); // cited by the reports' own method sections (report.js methodRefs)
   for (const k of Object.keys(C.REFERENCES)) assert.ok(used.has(k), `${k} is not used`);
 });
 

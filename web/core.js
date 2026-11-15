@@ -167,7 +167,7 @@ export const RULES = {
     checks: "No-template controls have no melt peak comparable to the target product.",
     why: "A Tm near the product suggests template contamination; a lower Tm is often primer-dimer. The cause is not certain." },
   rna_type_reference_mismatch: { group: "RNA type", category: "review_warning", severity: "low", title: "Target and reference are different kinds of RNA",
-    checks: "In the Analysis step, miRNA targets are not normalised to an mRNA reference gene, and mRNA targets not to a miRNA or snoRNA/snRNA reference. RNA types come from the Genes step, or are guessed from the target name.",
+    checks: "In the Analysis step, miRNA targets are not normalised to an mRNA reference gene, and mRNA targets not to a miRNA or snoRNA/snRNA reference. RNA types come from the Targets panel (More, then Method details and thresholds), or are guessed from the target name.",
     why: "A miRNA and an mRNA are usually reverse transcribed in different ways (stem-loop or poly(A) RT against oligo-dT or random primers), so a ΔCt between them also carries the difference between those reactions. References of the same RNA class are preferred." },
   mirna_no_small_rna_reference: { group: "RNA type", category: "missing_context", severity: "low", title: "miRNA targets without a small-RNA reference",
     checks: "When the plate has miRNA targets, it also has a small-RNA reference (a snoRNA or snRNA such as U6, RNU44 or RNU48), or a miRNA or spike-in is chosen as reference in the Analysis step.",
@@ -232,6 +232,12 @@ export const REFERENCES = {
     text: "Hougs L, Gatto F, Goerlich O, et al. Verification of analytical methods for GMO testing when implementing interlaboratory validated methods, version 2. European Network of GMO Laboratories. EUR 29015 EN. Publications Office of the European Union; 2017." },
   pfaffl2001: { short: "Pfaffl 2001", doi: "10.1093/nar/29.9.e45",
     text: "Pfaffl MW. A new mathematical model for relative quantification in real-time RT-PCR. Nucleic Acids Res. 2001;29(9):e45." },
+  vandesompele2002: { short: "Vandesompele et al. 2002 (geNorm)", doi: "10.1186/gb-2002-3-7-research0034",
+    text: "Vandesompele J, De Preter K, Pattyn F, et al. Accurate normalization of real-time quantitative RT-PCR data by geometric averaging of multiple internal control genes. Genome Biol. 2002;3(7):research0034." },
+  andersen2004: { short: "Andersen et al. 2004 (NormFinder)", doi: "10.1158/0008-5472.CAN-04-0496",
+    text: "Andersen CL, Jensen JL, Ørntoft TF. Normalization of real-time quantitative reverse transcription-PCR data: a model-based variance estimation approach to identify genes suited for normalization, applied to bladder and colon cancer data sets. Cancer Res. 2004;64(15):5245–5250." },
+  massart1997: { short: "Massart et al. 1997", doi: "",
+    text: "Massart DL, Vandeginste BGM, Buydens LMC, de Jong S, Lewi PJ, Smeyers-Verbeke J. Handbook of Chemometrics and Qualimetrics, Part A. Elsevier, Amsterdam; 1997 (inverse prediction from a calibration line)." },
   ruijter2009: { short: "Ruijter et al. 2009", doi: "10.1093/nar/gkp045",
     text: "Ruijter JM, Ramakers C, Hoogaars WMH, et al. Amplification efficiency: linking baseline and bias in the analysis of quantitative PCR data. Nucleic Acids Res. 2009;37(6):e45." },
   ririe1997: { short: "Ririe et al. 1997", doi: "10.1006/abio.1996.9916",
@@ -326,8 +332,9 @@ const RULE_EVIDENCE = {
 };
 for (const [k, e] of Object.entries(RULE_EVIDENCE)) Object.assign(RULES[k], { evidence: e.evidence, refs: e.refs });
 // References behind the settings and the rules that produced findings, in a stable order.
-export function referencesFor(findings = []) {
-  const keys = new Set([...RULESET_FIELDS.flatMap(f => f.refs || []), ...findings.flatMap(f => RULES[f.rule]?.refs || [])]);
+// extra: keys of methods the report itself uses (absolute quantities, reference-gene stability).
+export function referencesFor(findings = [], extra = []) {
+  const keys = new Set([...RULESET_FIELDS.flatMap(f => f.refs || []), ...findings.flatMap(f => RULES[f.rule]?.refs || []), ...extra]);
   return Object.keys(REFERENCES).filter(k => keys.has(k)).map(k => ({ key: k, ...REFERENCES[k] }));
 }
 
@@ -628,7 +635,7 @@ export function parseResults(input, opts = {}) {
     const sw = wellKey(get("well")) ? null : splitWell(get("well"));
     out.push({ id: line, line, well: get("well") ?? "", key: wellKey(get("well")) || sw?.key || null, wellPrefix: sw?.prefix ?? null,
       sample: get("sample"), target: get("target") ?? r.det ?? null,
-      ct: get("ct"), roleRaw, role: normalizeRole(roleRaw), quantity: get("quantity"), group: get("group"),
+      ct: get("ct"), roleRaw, role: normalizeRole(roleRaw), quantity: /^(nan|n\/?a|-|none)$/i.test((get("quantity") ?? "").trim()) ? null : get("quantity"), group: get("group"), // CFX writes "NaN" for no quantity
       bio_unit: get("bio_unit"), pair: get("pair"), factor2: get("factor2"), fluor: get("fluor"), omit: /^(true|yes|1)$/i.test(get("omit") || "") || /^(false|no|0)$/i.test(get("include") || ""),
       tm: get("tm"), tm2: get("tm2"), chemistry: get("chemistry") });
   }
@@ -1072,7 +1079,15 @@ export function analyze(exp) {
   for (const m of parsed.malformed)
     add("malformed_row", m.line, { description: `Source line ${m.line} was not parsed: ${m.reason}.`, lines: [m.line],
       evidence: `raw fields: ${m.raw}`, next_check: "Open the original file at this line and check for missing, extra or unquoted delimiters." });
-  for (const r of rows) if (!r.key)
+  // 1536-well positions (rows past P or two-letter rows such as LightCycler's "Aa23", columns up to 48): one finding
+  // that says so, not one per well.
+  const big = rows.filter(r => !r.key && /^([A-Za-z]{1,2})0*([1-9]\d?)$/.test(String(r.well ?? "").trim()) && Number(/(\d+)$/.exec(String(r.well).trim())[1]) <= 48);
+  if (big.length >= 20 && big.length >= rows.length / 2)
+    add("invalid_well_coordinate", big[0].line, { description: `${big.length} wells have positions such as '${big[0].well}', '${big.at(-1).well}' that look like a 1536-well plate. PlateCheck reads 96- and 384-well plates only, so these wells were not placed on a plate.`,
+      evidence: `${big.length} of ${rows.length} rows; first at source line ${big[0].line}: well '${big[0].well}'`, lines: big.slice(0, 50).map(r => r.line),
+      next_check: "Export 384-well blocks (or the wells of interest) with standard positions A1–P24, or check the file in software that supports 1536-well plates." });
+  const bigSet = new Set(big.length >= 20 && big.length >= rows.length / 2 ? big : []);
+  for (const r of rows) if (!r.key && !bigSet.has(r))
     add("invalid_well_coordinate", r.line, { ...at(r), description: `Well '${r.well}' is not a valid plate position.`,
       evidence: `source line ${r.line}: well '${r.well}', raw Ct ${fmtRaw(r.ct)}`, next_check: "Check the export for a column shift or typo." });
   // Wells set to "Not used" don't count, so marking one of the two results Not used resolves the duplicate.
@@ -1187,7 +1202,7 @@ export function analyze(exp) {
         evidence: `reason: ${na.reason} (${na.by}, ${na.at.slice(0, 10)})`, next_check: "None." });
       else add("missing_control", `${role}|${t}`, { target: t, description: `No ${label.toLowerCase()} was found for target '${t}'.`,
         evidence: `expectation from rule set ${rulesetId(exp.ruleset)}; no well for '${t}' has role '${role}'`,
-        next_check: "Assign the control's role in the plate map, or mark it not applicable with a reason on the Context tab." });
+        next_check: "Assign the control's role in the plate map, or mark it not applicable with a reason (More, then Method details and thresholds)." });
     }
     for (const r of ws) {
       const c = ctNum(r.ct, r.dc);
@@ -1224,7 +1239,7 @@ export function analyze(exp) {
     add("no_control_roles", "all", { description: "No well has an NTC, positive, no-RT or standard role.",
       evidence: "all used wells are samples", next_check: "Assign control roles in the plate map if the plate contains controls." });
 
-  // RNA type (exp.targets, web/genes.js): the type set in the Genes step, otherwise the guess from the name.
+  // RNA type (exp.targets, web/genes.js): the type set in the Targets panel (More, then Method details and thresholds), otherwise the guess from the name.
   // Low-severity notes only, and each target is reported by at most one of the two miRNA notes.
   const tt = new Map(targetTable(exp, active).map(x => [x.name, x]));
   const typeOf = t => tt.get(t)?.type, typed = ts => ts.map(t => `${t} (${typeOf(t)}, ${tt.get(t)?.saved?.type ? "set in Genes" : "guessed from the name"})`).join(", ");
@@ -1242,7 +1257,7 @@ export function analyze(exp) {
       add("rna_type_reference_mismatch", "analysis", { wells: wl(ws), lines: ln(ws), target: mismatched.length === 1 ? mismatched[0] : null,
         description: `${mismatched.length} target(s) are normalised in the Analysis step to a reference of a different RNA type.`,
         evidence: `targets: ${typed(mismatched)}; reference(s): ${typed(aRefs)}`,
-        next_check: "Normalise miRNAs to small-RNA references (U6, RNU44, RNU48, a stable miRNA or a spike-in) and mRNAs to mRNA reference genes, or correct the RNA type in the Genes step if it is wrong." }); }
+        next_check: "Normalise miRNAs to small-RNA references (U6, RNU44, RNU48, a stable miRNA or a spike-in) and mRNAs to mRNA reference genes, or correct the RNA type in the Targets panel (More, then Method details and thresholds) if it is wrong." }); }
   }
   const smallOnPlate = aRefs.some(r => SMALL.includes(typeOf(r))) || [...tt.values()].some(x => x.type === "sncRNA");
   const lonelyMirs = mirs.filter(t => !mismatched.includes(t));
@@ -1369,7 +1384,7 @@ export function analyze(exp) {
 
   // Melt curves (FR-12): only when configured for the assay
   if (!exp.melt) res.notAssessed.push(tmRows.length ? "Melt curves: no melt curve file, so only the Tm values in the results file were checked (no peak heights, no NTC peaks)." : "Melt curves: no melt data was provided.");
-  else if (!v.meltChecks) res.notAssessed.push("Melt curves: data was provided, but melt-curve checks are not enabled for this assay (More, then Method details and thresholdses). PlateCheck does not assume melt analysis applies.");
+  else if (!v.meltChecks) res.notAssessed.push("Melt curves: data was provided, but melt-curve checks are not enabled for this assay (More, then Method details and thresholds). PlateCheck does not assume melt analysis applies.");
   else {
     // Numbered wells in a melt file (SDS) take their positions from the results file's plate size.
     const plate = parsed.plateSize || (rows.some(r => r.key && (r.key.charCodeAt(0) > 72 || Number(r.key.slice(1)) > 12)) ? 384 : 96);
@@ -1430,7 +1445,7 @@ export function analyze(exp) {
     add("missing_metadata", f.key, { severity: f.severity, title: `Not provided: ${f.label}`,
       description: `${f.label} was not provided.${f.severity === "info" ? " This is optional context." : ""}`,
       evidence: "the context field is empty" + (f.key === "efficiency_evidence" ? " and there is no standard curve in this run" : ""),
-      next_check: "Add it on the Context tab, or note why it does not apply." });
+      next_check: "Add it under More, then Method details and thresholds, or note why it does not apply." });
   }
 
   res.findings.sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity] || wellOrder(a.wells[0]) - wellOrder(b.wells[0]) || a.id.localeCompare(b.id));

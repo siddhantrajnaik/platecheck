@@ -14,7 +14,7 @@ Only what the run itself shows. An item is pre-answered **Yes** when the run con
 | 3.6, 4.4 Reagent lots | the "Reagent and primer lot numbers" you recorded | starting point |
 | 4.5, 5.3 Cycling, baseline / Cq method | the "Run settings" you recorded | starting point |
 | 4.6 Instrument | "Instrument and software version", or the instrument named in the file | Yes |
-| 5.1 Raw fluorescence data | which curve files were imported (RDML export isn't available yet) | starting point |
+| 5.1 Raw fluorescence data | which curve files were imported; they can be shared as RDML (Report → Other formats) | starting point |
 | 5.2 Standards | the standard curves on the plate (identity of the standards is yours to add) | starting point |
 | 5.4 Analysis software | the instrument software and the PlateCheck version and build | Yes |
 | 5.5, 5.6 Controls | NTC, positive and no-RT wells per target, how many amplified and at which Cq | Yes |

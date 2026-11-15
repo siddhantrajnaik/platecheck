@@ -395,7 +395,8 @@ export function linRegPCR(curves, { effRange = 0.05 } = {}) {
     const e = pcrEff.map((v, r) => (lowCqEff[r] || skip[r] || !(v >= 1.001) || tarOf[r] !== t || skipPlat[r] ? NaN : v));
     removeOutlier(e, noPlat).forEach((o, r) => { if (o) outlier[r] = true; });
     const kept = e.map((v, r) => (outlier[r] ? NaN : v)), me = nanmean(kept), sd = nanstd0(kept);
-    perTarget[targets[t - 1]] = { meanEff: me, sdEff: sd, n: kept.filter(v => !isnan(v)).length, median: nanmedian(kept), threshold: threshold[t], lower: lowWin[t], upper: upWin[t] };
+    const nul = v => (finite(v) ? v : null); // NaN when no well of the target qualifies
+    perTarget[targets[t - 1]] = { meanEff: nul(me), sdEff: nul(sd), n: kept.filter(v => !isnan(v)).length, median: nul(nanmedian(kept)), threshold: threshold[t], lower: lowWin[t], upper: upWin[t] };
     for (let r = 0; r < R; r++) if (tarOf[r] === t) {
       meanEff[r] = me; sdEff[r] = sd;
       const zyme = chem[r] === "DNA-zyme probe", corr = E => (zyme ? -1 + log10(1 / (1 - 1 / E)) / log10(E) : PROBE.has(chem[r]) ? -1 : 0);
@@ -511,11 +512,22 @@ export function linregCsv(out, toCsv) {
   return toCsv([["Well", "Sample", "Target", "Efficiency (individual)", "R2", "Points in window", "Log-linear points", "Baseline", "Mean efficiency of target", "SD of target efficiency",
     "Cq (LinRegPCR)", "Cq (instrument)", "N0 (fluorescence units)", "Common threshold", "Used for mean efficiency", "Notes"],
     ...out.rows.map(w => [w.key, w.sample ?? "", w.target, f(w.eff, 4), f(w.r2, 5), w.nIncluded, w.nLog, f(w.baseline, 4), f(w.meanEff, 4), f(w.sdEff, 4),
-      f(w.cq, 3), f(w.instrumentCt, 3), w.n0 === null ? "" : w.n0.toExponential(4), f(out.threshold, 4), whyNotUsed(w) || "yes", [...w.excl, ...w.notes].join("; ")])]);
+      f(w.cq, 3), f(w.instrumentCt, 3), w.n0 === null ? "" : w.n0.toExponential(4), f(out.threshold, 4), whyNotUsed(w) || "yes", [...w.excl, ...w.notes].map(noteText).join("; ")])]);
 }
 // Per-target efficiency factors for the Pfaffl correction (analysis.js): { target: { E, n } }, pooled over runs by well count.
 export function targetEfficiencies(list) {
   const acc = {};
   for (const o of list) if (o) for (const [t, v] of Object.entries(o.targets)) if (Number.isFinite(v.meanEff) && v.n > 0) { const a = (acc[t] ||= { s: 0, n: 0 }); a.s += v.meanEff * v.n; a.n += v.n; }
   return Object.fromEntries(Object.entries(acc).map(([t, a]) => [t, { E: a.s / a.n, n: a.n }]));
+}
+
+// LinRegPCR's notes as rdmlpython writes them ("indiv PCR eff is 1.650 < 1.7"), in plain words for the app and the CSV.
+export function noteText(n) {
+  return String(n)
+    .replace(/^indiv PCR eff is ([\d.]+) < 1\.7$/, (m, e) => `efficiency ${(+e).toFixed(3)} (${((e - 1) * 100).toFixed(1)}%) is below 1.7 (70%)`)
+    .replace(/^indiv PCR eff is (higher|lower) than mean PCR eff by ([\d.]+)$/, "efficiency is $2 $1 than the target's mean")
+    .replace(/^Cq < 10;N0 unreliable$/, "Cq below 10, so N0 is unreliable").replace(/^Cq > 34;N0 unreliable$/, "Cq above 34, so N0 is unreliable")
+    .replace(/^only (\d+) values in log phase$/, "only $1 points in the log-linear phase")
+    .replace(/^PCR efficiency outlier$/, "efficiency is an outlier for its target").replace(/^instable baseline/, "unstable baseline")
+    .replace(/^no indiv PCR eff can be calculated$/, "no efficiency could be worked out");
 }

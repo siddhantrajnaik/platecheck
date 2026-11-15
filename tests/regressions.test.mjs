@@ -77,3 +77,30 @@ test("report: one line per kind of missing method detail, however many wells it 
   const n = (html.match(/Role in file not recognised/g) || []).length;
   assert.ok(n >= 1 && n <= 3, `${n} mentions`); assert.match(html, /\(30 wells: A1, A2/);
 });
+
+// Second round (surface sweep over every real file, 2026-11-16; platecheck-qa/surface).
+test("1536-well positions give one clear finding, not one per well", () => {
+  const rows = [["Pos", "Name", "Target", "Cp"], ...Array.from({ length: 40 }, (_, k) => [`${"ABCD"[k % 4]}${"abcd"[k % 4]}${k + 1}`, `s${k}`, "G", "25"])];
+  const f = run(rows).res.findings.filter(x => x.rule === "invalid_well_coordinate");
+  assert.equal(f.length, 1); assert.match(f[0].description, /40 wells .*1536-well plate/);
+});
+test("CFX's literal NaN quantity is read as no quantity", () => {
+  const { res } = run([["Well", "Sample", "Target", "Content", "Starting Quantity (SQ)", "Cq"], ["A1", "s", "G", "Unkn", "NaN", "21.07"]]);
+  assert.equal(res.rows[0].quantity, null);
+});
+test("an uncompressed RDML file (rdml_data.xml on its own) is read", async () => {
+  const { e, res } = run([["Well", "Sample", "Target", "Task", "Cq"], ["A1", "s", "G", "Unknown", "21"], ["A2", "s", "G", "Unknown", "21.2"]]);
+  const b = await R.readRdml("x.xml", new TextEncoder().encode(R.rdmlXml(e, res)));
+  assert.equal(b.rdml.runs[0].reactions, 2);
+  assert.equal(await R.readRdml("x.xml", new TextEncoder().encode("<html>no</html>")), null);
+});
+test("RDML notes mention curves that have no well in the results file", () => {
+  const amp = [["Well", "Target", "Cycle", "Fluorescence"]]; for (const w of ["A1", "A2"]) for (let c = 1; c <= 3; c++) amp.push([w, "G", c, c]);
+  const { e, res } = run([["Well", "Sample", "Target", "Task", "Cq"], ["A1", "s", "G", "Unknown", "21"]], amp);
+  assert.match(R.rdmlNotes(e, res).join(" "), /1 amplification curve\(s\) have no well in the results file .*A2 G/);
+});
+test("LinRegPCR target summary has null, not NaN, when no well qualifies", () => {
+  const flat = Array.from({ length: 4 }, (_, k) => ({ key: `A${k + 1}`, target: "G", type: "unkn", fluor: Array.from({ length: 40 }, (_, i) => 100 + ((i * 7 + k) % 3)) }));
+  const o = L.linRegPCR(flat);
+  assert.equal(o.targets.G.meanEff, null); assert.equal(o.targets.G.sdEff, null); assert.equal(o.targets.G.n, 0);
+});

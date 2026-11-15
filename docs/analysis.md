@@ -34,7 +34,7 @@ With one reference gene and group means this gives exactly Pfaffl's ratio
 
 `ratio = E_target^(Ct_target(control) − Ct_target(sample)) / E_ref^(Ct_ref(control) − Ct_ref(sample))`
 
-and with several references it is the qBase normalised relative quantity on the log2 scale (Hellemans et al. 2007). With `E = 2` everywhere, `w = 1` and it reduces to plain ΔΔCt. A target without a standard curve gets 100% and a note; an efficiency outside 90–110% gets a note too. If several plates in a study have a curve for the same target, their efficiencies are averaged.
+and with several references it is the qBase normalised relative quantity on the log2 scale (Hellemans et al. 2007). With `E = 2` everywhere, `w = 1` and it reduces to plain ΔΔCt. A target without a standard curve gets 100% and a note; a standard-curve efficiency outside 80–120% is not used (100% and a note), and one outside 90–110% is used with a note. If several plates in a study have a curve for the same target, their efficiencies are averaged.
 
 **Efficiencies from the amplification curves.** With “Efficiencies from: Amplification curves, per-well LinRegPCR”, `E_t` is instead the target's mean LinRegPCR efficiency (see “Per-well efficiency” below): no dilution series needed, but the curves must be raw fluorescence. A target without a usable LinRegPCR efficiency gets 100% and a note; one outside 60–120% is not used (100% and a note), and one outside 80–110% is used with a note (per-well efficiencies of real assays often come out at 85–95%, below standard-curve estimates). In a study, the per-plate means are pooled, weighted by the number of wells.
 
@@ -370,7 +370,7 @@ Every well is listed with its efficiency, R², Cq from LinRegPCR next to the ins
 
 ## In the report
 
-When the analysis is on, the HTML report gets an Analysis section: the method in words, the reference genes, the control group, the test used, n per group, the 95% confidence intervals, the test's p with both corrections, the Tukey or Games–Howell pairs, the paired fold change, the two-way ANOVA or Kruskal–Wallis results when those were chosen, the gene set enrichment when gene sets were chosen, and the notes. A study has its own HTML report (see "Several plates").
+When the analysis is on, the report (PDF and HTML) gets an Analysis section: the method in words, the reference genes, the control group, the test used, n per group, the 95% confidence intervals, the test's p with both corrections, the Tukey or Games–Howell pairs, the paired fold change, the two-way ANOVA or Kruskal–Wallis results when those were chosen, the gene set enrichment when gene sets were chosen, and the notes. A study has its own HTML report (see "Several plates").
 
 ## Known limits
 
@@ -392,9 +392,8 @@ When the analysis is on, the HTML report gets an Analysis section: the method in
 - Ruijter JM, Ramakers C, Hoogaars WMH, Karlen Y, Bakker O, van den Hoff MJB, Moorman AFM (2009). Amplification efficiency: linking baseline and bias in the analysis of quantitative PCR data. *Nucleic Acids Research* 37(6):e45. doi:10.1093/nar/gkp045
 - Untergasser A, Ruijter JM, Benes V, van den Hoff MJB (2021). Web-based LinRegPCR: application for the visualization and analysis of (RT)-qPCR amplification and melting data. *BMC Bioinformatics* 22:398. doi:10.1186/s12859-021-04306-1
 - Pfaffl MW (2001). A new mathematical model for relative quantification in real-time RT-PCR. *Nucleic Acids Research* 29(9):e45. doi:10.1093/nar/29.9.e45
-- Vandesompele J, De Preter K, Pattyn F, Poppe B, Van Roy N, De Paepe A, Speleman F (2002). Accurate normalization of real-time quantitative RT-PCR data by geometric averaging of multiple internal control genes. *Genome Biology* 3(7):research0034. doi:10.1186/gb-2002-3-7-research0034
 - Hellemans J, Mortier G, De Paepe A, Speleman F, Vandesompele J (2007). qBase relative quantification framework and software for management and automated analysis of real-time quantitative PCR data. *Genome Biology* 8(2):R19. doi:10.1186/gb-2007-8-2-r19
-- Benjamini Y, Hochberg Y (1995). Controlling the false discovery rate: a practical and powerful approach to multiple testing. *Journal of the Royal Statistical Society, Series B* 57(1):289–300. doi:10.2307/2346101
+- Benjamini Y, Hochberg Y (1995). Controlling the false discovery rate: a practical and powerful approach to multiple testing. *Journal of the Royal Statistical Society, Series B* 57(1):289–300. doi:10.1111/j.2517-6161.1995.tb02031.x
 - Student (1908). The probable error of a mean. *Biometrika* 6(1):1–25. doi:10.1093/biomet/6.1.1
 - Tukey JW (1949). Comparing individual means in the analysis of variance. *Biometrics* 5(2):99–114. doi:10.2307/3001913
 - Kramer CY (1956). Extension of multiple range tests to group means with unequal numbers of replications. *Biometrics* 12(3):307–310. doi:10.2307/3001469

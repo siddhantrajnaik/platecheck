@@ -44,6 +44,14 @@ export function missingGroups(findings, reviews) {
   });
 }
 
+// References for methods the report uses beyond the checks: absolute quantities, reference-gene stability.
+export function methodRefs(exp, res) {
+  const k = [];
+  if (res.stdCurves?.length && Q.quantify(res.rows, res.stdCurves).units.length) k.push("massart1997");
+  if (exp.analysis?.on && RG.summaryText(RG.forRun(res, exp.analysis).r)) k.push("vandesompele2002", "andersen2004");
+  return k;
+}
+
 // Absolute quantity of the unknowns (web/absquant.js), as in the app's Review page.
 function absQuantHtml(res) {
   const q = Q.quantify(res.rows, res.stdCurves);
@@ -164,7 +172,7 @@ ${table(["When", "Who", "What"], exp.audit.map(a => [when(a.at), a.actor, a.deta
 
 <h2>References</h2>
 <p class="sub small">Sources for the thresholds above and for the checks that raised a flag. The reasoning behind each number is in docs/thresholds.md in the PlateCheck repository.</p>
-<ol class="refs">${referencesFor(res.findings).map(r => `<li>${esc(r.text)} <a href="https://doi.org/${esc(r.doi)}">doi:${esc(r.doi)}</a></li>`).join("")}</ol>
+<ol class="refs">${referencesFor(res.findings, methodRefs(exp, res)).map(r => `<li>${esc(r.text)}${r.doi ? ` <a href="https://doi.org/${esc(r.doi)}">doi:${esc(r.doi)}</a>` : ""}</li>`).join("")}</ol>
 
 <h2>Limits of this report</h2>
 <ul>${LIMITATIONS.map(l => `<li>${esc(l)}</li>`).join("")}</ul>

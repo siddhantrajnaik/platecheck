@@ -5,7 +5,7 @@
 ### Excel workbooks
 `.xlsx`, `.xls` (Excel 97 and later) and `.ods` files are read in the browser with SheetJS (`web/vendor/xlsx.mjs`, Apache-2.0), which is loaded only when a workbook is dropped. Each sheet is turned into tab-separated text and then read exactly like a text export, so everything below applies to sheets too.
 
-- Every non-empty sheet is checked. The best sheet for each kind is picked: results (a sheet named like `Results` wins), amplification (`Amplification…`) and melt (`Melt…`). One QuantStudio workbook can therefore give the results and both curve files at once. In the Data tab preview you can switch to another sheet.
+- Every non-empty sheet is checked. The best sheet for each kind is picked: results (a sheet named like `Results` wins), amplification (`Amplification…`) and melt (`Melt…`). One QuantStudio workbook can therefore give the results and both curve files at once. In the Upload step preview you can switch to another sheet.
 - Numbers are taken as stored in the file, with every digit, not as Excel shows them on screen. Date cells keep their displayed form; formula cells use the value Excel saved; errors such as `#DIV/0!` stay as text and are flagged like any other non-numeric Ct.
 - The imported file is recorded as `<workbook> [<sheet>]` with the workbook name, sheet name and the SHA-256 of the workbook itself; the checksum stored with the run is of the sheet text that was read. *Download sheet as text* gives back exactly that text.
 - Instrument project files (`.eds`, `.pcrd`) are also zip files but are not workbooks, and are refused with a message.
@@ -15,7 +15,7 @@ Comma, tab or semicolon separated text, or a sheet of an Excel workbook. Column 
 
 | Field | Accepted column names | Required |
 |---|---|---|
-| Well | `Well Position`, `Well`, `Pos`, `Position` (values such as `A1` or `A01`) | yes |
+| Well | `Well Position`, `Well`, `Pos`, `Position` (values such as `A1` or `A01`; 96- and 384-well plates, A1–P24; 1536-well positions such as `Aa23` are reported in one finding and not placed) | yes |
 | Ct/Cq | `Ct`, `Cq`, `CT`, `Cт`, `C_T`, `CRT`, `Cp` | yes |
 | Sample | `Sample`, `Sample Name`, `Name` | no |
 | Target | `Target`, `Target Name`, `Detector`, `Detector Name`, `Gene`, `Assay` | no |
@@ -55,7 +55,7 @@ RDML (Real-time PCR Data Markup Language, https://rdml.org; Lefever et al. 2009,
 | `excl` | excluded on the instrument (like QuantStudio's Omit) |
 | target type `ref` | named in the upload note, to choose as references in the Analysis step |
 
-A file with several runs uses the first and says so; load another with Replace. Runs with curves but no Cq values (raw-data-only RDML) get their Cq from LinRegPCR on import (see docs/analysis.md, “Per-well efficiency”), and the upload note says so. Each target's `dyeChemistry` is kept as the Chemistry column. On export, RDML keeps type, group, biological unit and quantity per sample, so wells that share a sample name but differ in these become separate samples named “S1 #2”, “S1 #3” (the download note lists them); a well without a target gets its fluorophore, or “unnamed target”.
+An uncompressed RDML file (the `rdml_data.xml` on its own, `.xml`) is read too. A file with several runs uses the first and says so; load another with Replace. Runs with curves but no Cq values (raw-data-only RDML) get their Cq from LinRegPCR on import (see docs/analysis.md, “Per-well efficiency”), and the upload note says so. Each target's `dyeChemistry` is kept as the Chemistry column. On export, RDML keeps type, group, biological unit and quantity per sample, so wells that share a sample name but differ in these become separate samples named “S1 #2”, “S1 #3” (the download note lists them); a well without a target gets its fluorophore, or “unnamed target”.
 
 **Export.** Report step, Other formats, "Download RDML": RDML 1.3 with the plate format, samples (type, standards' quantity, group and biological unit as annotations), targets (type `ref` for the analysis references; standard-curve efficiency where there is one), and per reaction the Cq, the exclusion flag and the raw amplification and melt points. What RDML can't hold is listed after the download: wells without a plate position or target, reactions without a sample name (the well name is used), Cq values that aren't numbers, a second result for the same target in one well, and melt curves that are derivative values (RDML holds raw melt fluorescence).
 
@@ -79,7 +79,7 @@ Several candidate columns: if more than one column could be the Ct/Cq column (or
 
 Excel workbooks with several sheets that look like results: a sheet named exactly `Results` (or `Ct Results`, `Cq Results`) is preferred over one that only contains the word, such as `Old results`. When more than one sheet qualifies, the note after import names the others so you can switch.
 
-Import template: `well,sample,target,ct,role,group,bio_unit,quantity` (downloadable from the Data tab).
+Import template: `well,sample,target,ct,role,group,bio_unit,quantity` (downloadable from the Upload step).
 
 ### Amplification and melt curves (optional)
 - The header row can sit below a block of run details (as in QuantStudio Excel exports); the first row with a `Cycle` or `Temperature` column is used.
@@ -98,9 +98,11 @@ Import template: `well,sample,target,ct,role,group,bio_unit,quantity` (downloada
 |---|---|
 | `<title>-report.pdf` | The report as an A4 PDF, made in the browser (web/report-pdf.js; pdfmake, MIT; IBM Plex fonts embedded, OFL): first page with the run identity, status, finding counts, a plate overview (rings on wells in open findings) and a contents list; then the findings, the method sections and the plate map and history as appendices. Running header with the run ID, footer with the app build, the results file checksum and page numbers. While any finding is unreviewed every page carries a DRAFT · NOT REVIEWED watermark and the footer says how many are open; once all are reviewed the watermark is a faint PlateCheck mark. Vector text, so it can be searched and copied. Nothing is sent anywhere. Long names without spaces wrap inside their column; Greek and other letters Plex Mono lacks are set in Plex Sans; characters IBM Plex doesn't have at all (CJK, emoji) show as empty boxes in the PDF but are intact in the HTML report. |
 | `<title>-report.html` | The same report as a web page (Report → Other formats), readable without PlateCheck. |
-| `<id>.wells.csv` | One row per source data row: source line, raw and normalised well, effective labels, role and its source, raw Ct/Cq, and the file's original label values. |
-| `<id>.findings.csv` | One row per finding: ID, rule, rule version, category, severity, description, wells, source lines, evidence, next check, disposition, note, reviewer. |
-| `<id>.results.json` | `format: "assaylint-results"`: experiment context, file metadata and checksums, rule set, checks performed and not assessed, summary, findings, replicate groups, controls, standard curves, reviews and wells. |
-| `<id>.platecheck.json` | `format: "assaylint-packet"`, `packet_version: 1`: the complete experiment, including original files and audit history, plus the analysis. Importing verifies each embedded file's SHA-256. |
+| `<title>-wells.csv` | One row per source data row: source line, raw and normalised well, effective labels, role and its source, raw Ct/Cq, and the file's original label values. |
+| `<title>-flags.csv` | One row per finding: ID, rule, rule version, category, severity, description, wells, source lines, evidence, next check, disposition, note, reviewer. |
+| `<title>-results.json` | `format: "assaylint-results"`: experiment context, file metadata and checksums, rule set, checks performed and not assessed, summary, findings, replicate groups, controls, standard curves, reviews and wells. |
+| `<title>.platecheck.json` | `format: "assaylint-packet"`, `packet_version: 1`: the complete experiment, including original files and audit history, plus the analysis. Importing verifies each embedded file's SHA-256. |
+| `<title>.rdml` | The run as RDML 1.3 (plate, samples, targets, Cq, raw amplification and melt fluorescence) for RDML-Tools, LinRegPCR and other qPCR software; see “RDML” above for what it can't hold. |
+| `<title>-MIQE-2.0-checklist.doc` / `.csv` | The MIQE 2.0 checklist with PlateCheck's suggestions and your answers (Report step). |
 
 Finding IDs are `<rule>:<key>` and say what a flag is about, so reviews stay attached to the right flag: per-well flags use the well and target (`ntc_amplification:H12|GAPDH`, with `#2` for a second flag of the same rule on that well), other flags their target, unit or role. They never use a file line, so replacing or re-reading the file can't move a decision onto another well. A decision is only applied while the flag's description (which carries its values) is the one that was reviewed; if the values changed, the flag shows "Needs re-review" and the earlier decision is shown next to it but not applied. Runs saved before November 2026 keyed per-well decisions by file line; they are moved to the new IDs when the flag's values match, and left unapplied otherwise. Reviews of findings that no longer appear (for example after a plate-map correction) are kept and listed separately in the report.

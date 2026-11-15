@@ -13,14 +13,14 @@ It won't tell you your experiment is right. It points out things worth a second 
 ## How to use it
 
 1. Open the site and drop your instrument export on the home page. Add the amplification and melt curve files at the same time if you have them.
-2. It takes you straight to **Review**: each flag shows what was found and the values behind it. Click "Looks fine", "Doesn't apply", "I'll fix it" or "Fixed", and it moves to the next one.
+2. It takes you straight to **Review**: each flag shows what was found and the values behind it. Click "Looks fine", "Doesn't apply", "Still to fix" or "Fixed", and it moves to the next one.
 3. The bar at the top tells you what's left, for example labelling a well that has no sample, or marking which wells are controls. "Take me there" opens the right place.
 4. On **Plate**, click wells (or a whole row or column) and pick what they are: sample, NTC, positive control, no-RT, standard or not used.
 5. Download the report from **Report**.
 
 Method details, thresholds, comparing two runs and renaming or deleting a run are under **More**. Tick "Show all steps" in the sidebar if you prefer the full step-by-step view.
 
-It reads exports from QuantStudio, Bio-Rad CFX, ABI 7500/7900HT and LightCycler 480, saved as Excel (.xlsx, .xls), CSV or text, or any sheet with well and Ct/Cq columns. Besides the report, you can download the well data and flags as CSV, everything as JSON, or the whole run as one file you can open again later.
+It reads exports from QuantStudio, Bio-Rad CFX, ABI 7500/7900HT and LightCycler 480, saved as Excel (.xlsx, .xls), CSV or text, or any sheet with well and Ct/Cq columns. The report downloads as a PDF (or an HTML page). You can also download the well data and flags as CSV, the run as RDML for other qPCR software, the MIQE 2.0 checklist, everything as JSON, or the whole run as one file you can open again later.
 
 ## Run it yourself
 
@@ -28,7 +28,7 @@ It reads exports from QuantStudio, Bio-Rad CFX, ABI 7500/7900HT and LightCycler 
 python -m http.server 8123 --directory web
 ```
 
-Then open http://localhost:8123 and click **Open demo run**.
+Then open http://localhost:8123 and click **No file handy? Try it with a sample run**.
 
 There's also a command-line version (needs Node 20+):
 
@@ -63,4 +63,4 @@ LinkedIn: [siddhant-raj-naik](https://www.linkedin.com/in/siddhant-raj-naik-2206
 
 With guidance from **Sanket Mukherjee**, PhD, KSBS, IIT Delhi (smukherjee109@gmail.com).
 
-PlateCheck is released under the MIT License ([LICENSE](LICENSE)). It is built with three.js (MIT), SheetJS for reading Excel files (Apache-2.0, `web/vendor/xlsx-LICENSE`) and IBM Plex fonts (SIL OFL).
+PlateCheck is released under the MIT License ([LICENSE](LICENSE)). It is built with three.js (MIT), SheetJS for reading Excel files (Apache-2.0, `web/vendor/xlsx-LICENSE`), pdfmake for the PDF report (MIT, `web/vendor/pdfmake-LICENSE`) and IBM Plex fonts (SIL OFL).
