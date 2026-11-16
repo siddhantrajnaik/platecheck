@@ -125,7 +125,6 @@ textarea { resize: vertical; line-height: 1.45; }
 .welcome .btn-row .btn { flex: 0 0 auto; min-width: 150px; }
 .welcome-plate { margin: 0; }
 .welcome-plate .plate-art { width: 100%; height: auto; display: block; }
-.welcome-plate figcaption { margin-top: 12px; font-size: .82rem; color: var(--muted); }
 @media (max-width: 1000px) { .welcome { grid-template-columns: 1fr; padding: 40px 24px; gap: 32px; } }
 
 /* data import */
@@ -407,3 +406,21 @@ dialog form { margin-top: 16px; }
 .miqe small { display: block; margin-top: 2px; }
 details.miqe-sec { margin: 10px 0; }
 details.miqe-sec > summary { cursor: pointer; font-weight: 600; }
+
+/* Home page: four closed dropdowns (By hand or with PlateCheck / What it does / What it doesn't do / How it goes) */
+.home-more { margin-top: 36px; max-width: 760px; border-top: 1px solid var(--rule-soft); }
+.home-more details { border-bottom: 1px solid var(--rule-soft); }
+.home-more summary { cursor: pointer; padding: 14px 4px; font-size: 1.02rem; font-weight: 600; color: var(--ink); list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.home-more summary::-webkit-details-marker { display: none; }
+.home-more summary::after { content: ""; flex: none; width: 7px; height: 7px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg) translateY(-2px); transition: transform .15s; }
+.home-more details[open] > summary::after { transform: rotate(-135deg) translateY(-2px); }
+.home-more summary:hover { color: var(--accent); }
+.home-more .hm-body { margin: 0 0 16px; padding-left: 1.2rem; display: grid; gap: 6px; color: var(--ink); }
+.home-more div.hm-body { padding-left: 4px; }
+.home-more .ht-pair { grid-template-columns: 1fr 1fr; gap: 0 32px; }
+.home-more .ht-row h3 { font-size: .98rem; margin: 0 0 6px; }
+.home-more .ht-row p { margin: 0 0 6px; max-width: 46ch; }
+.home-more .ht-time { font-size: 1.15rem; font-weight: 600; color: var(--ink); }
+.home-more .ht-row:nth-of-type(2) .ht-time { color: var(--accent); }
+.home-more .ht-sum { grid-column: 1 / -1; margin: 12px 0 0; font-weight: 500; max-width: 80ch; }
+@media (max-width: 760px) { .home-more .ht-pair { grid-template-columns: 1fr; gap: 16px; } }
