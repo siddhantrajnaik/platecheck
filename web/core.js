@@ -448,6 +448,9 @@ const NO_AMP = new Set(["", "undetermined", "nan", "n/a", "na", "no ct", "no cq"
 const notPositive = ct => { const t = String(ct).trim().replace(/^(-?\d+),(\d+)$/, "$1.$2"), n = Number(t); return t !== "" && Number.isFinite(n) && n <= 0; };
 export const isNoAmp = ct => ct == null || NO_AMP.has(String(ct).trim().toLowerCase()) || notPositive(ct);
 // Parses a numeric string. dc = the file uses decimal commas (semicolon-separated exports from some locales).
+// A value that can only be a decimal comma: "0,689", "21,13", "1,5", "12345,6". "1,250" or "100,000" could be a thousands
+// separator, so on its own it doesn't show the file uses decimal commas.
+export const decimalCommaShown = v => { const t = String(v ?? "").trim(); return /^-?\d+,\d+$/.test(t) && !/^-?[1-9]\d{0,2}(,\d{3})+$/.test(t); };
 export function toNum(v, dc = false) {
   if (v == null) return null;
   let t = String(v).trim();
@@ -647,8 +650,10 @@ export function parseResults(input, opts = {}) {
     (prefixes.length > 1 ? " Different prefixes usually mean different plates or runs: split the file by prefix and check each plate on its own, or the same position on two plates will be treated as a duplicate." : ""));
   const decimalComma = delim !== "," && out.some(r => /^-?\d+,\d+$/.test(r.ct || ""));
   if (decimalComma) {
-    for (const r of out) r.dc = true;
-    warnings.push("Decimal commas were detected (for example “24,31”) and are read as decimal numbers. The raw values are kept unchanged.");
+    // Quantities are read with decimal commas only if one of them shows it ("0,5", "12,5"); "100,000" alone is a thousands separator.
+    const dcq = out.some(r => decimalCommaShown(r.quantity));
+    for (const r of out) { r.dc = true; r.dcq = dcq; }
+    warnings.push("Decimal commas were detected (for example “24,31”) and are read as decimal numbers" + (dcq ? "" : "; quantities have none, so a comma there (“100,000”) is a thousands separator") + ". The raw values are kept unchanged.");
   }
   if (!out.length && !malformed.length) throw new ParseError("The header was found but there are no data rows.", { recognized: names, headers, format });
   if (malformed.length > out.length)
@@ -728,7 +733,7 @@ export function parseCurves(input, kind, opts = {}) {
   // Decimal commas: always possible with ";"; in a tab-separated file only when values look like "21,13" and none uses a
   // decimal point (so "12,963" thousands separators in a point-decimal file stay thousands).
   const cells = all.slice(Math.max(0, hi) + 1, Math.max(0, hi) + 200).flatMap(r => r.cells.map(c => c.trim()));
-  const dc = delim === ";" || (delim === "\t" && cells.some(c => /^-?\d+,\d+$/.test(c)) && !cells.some(c => /^-?\d+\.\d+$/.test(c)));
+  const dc = delim === ";" || (delim === "\t" && cells.some(decimalCommaShown) && !cells.some(c => /^-?\d+\.\d+$/.test(c)));
   const rows = hi > 0 ? all.slice(hi) : all;
   if (rows.length < 2) throw new ParseError("The curve file has no data rows.");
   const hdr = rows[0].cells.map(s => s.trim()), norm = hdr.map(normHeader);
@@ -1011,7 +1016,7 @@ export function effectiveRows(exp, parsed) {
     // ChIP-style plates name every well by what it is ("IP", "Input", "IgG") and keep the chromatin prep in the group
     // column (Bio-Rad "Biological Set Name"). Then the sample name isn't a biological unit; sample + set is.
     if (bioSource === "default (sample name)" && group && ASSAY_WORD_RE.test(sample.trim())) { bio_unit = `${sample.trim()} · ${group}`; bioSource = "default (sample name + group)"; }
-    return { id: r.id, line: r.line, well: r.well, key: r.key, ct: r.ct, dc: r.dc, fluor: r.fluor,
+    return { id: r.id, line: r.line, well: r.well, key: r.key, ct: r.ct, dc: r.dc, dcq: r.dcq, fluor: r.fluor,
       sample, sampleSource, target, targetSource, group, quantity, pair, factor2, role, roleSource, roleRaw: r.roleRaw,
       fileRoleUnmapped: !!(r.roleRaw && !r.role), bio_unit, bioSource, omit: r.omit, tm: r.tm ?? null, tm2: r.tm2 ?? null, chemistry: r.chemistry ?? null,
       file: { sample: r.sample, target: r.target, group: r.group, role: r.role ?? r.roleRaw, bio_unit: r.bio_unit, quantity: r.quantity, pair: r.pair, factor2: r.factor2 } };
@@ -1065,6 +1070,8 @@ function cachedCurves(kind, text, extra, make) {
   curveCache.length = Math.min(curveCache.length, 4);
   return value;
 }
+// Plate size stated in the results file's run details ("Block Type = 384-Well Block"), or null.
+const statedPlate = parsed => { const m = Object.entries(parsed?.metadata || {}).map(([k, v]) => `${k} ${v}`).join(" ").match(/\b(96|384)[- ]?well/i); return m ? Number(m[1]) : null; };
 export function analyze(exp) {
   const v = exp.ruleset.values;
   const res = { findings: [], notAssessed: [], checksRun: [], replicateGroups: [], bioSummary: [], controls: [], stdCurves: [],
@@ -1299,12 +1306,12 @@ export function analyze(exp) {
   if (!stdRows.length) res.notAssessed.push("Standard curve: no wells have the Standard role, so efficiency and linearity were not assessed.");
   else res.checksRun.push(`Standard curve: efficiency ${v.effMin}–${v.effMax}%, R² ≥ ${v.r2Min}, at least ${v.minStdLevels} dilution levels` + (v.minStdRange > 0 ? `, range of at least ${v.minStdRange} log10 units` : ""));
   for (const [t, rs] of groupBy(stdRows.filter(r => r.target), r => r.target)) {
-    const bad = rs.filter(r => !(toNum(r.quantity, r.dc) > 0));
+    const bad = rs.filter(r => !(toNum(r.quantity, r.dcq) > 0));
     if (bad.length) add("std_curve_missing_quantity", t, { wells: wl(bad), lines: ln(bad), target: t,
       description: `${bad.length} standard well(s) for '${t}' have no positive numeric quantity.`,
       evidence: bad.map(r => `${name(r)}: ${fmtRaw(r.quantity)}`).join("; "), next_check: "Enter the quantity for each standard in the plate map." });
-    const pts = rs.filter(r => toNum(r.quantity, r.dc) > 0 && ctNum(r.ct, r.dc) !== null)
-      .map(r => ({ x: Math.log10(toNum(r.quantity, r.dc)), y: ctNum(r.ct, r.dc), well: r.key || r.well, q: r.quantity }));
+    const pts = rs.filter(r => toNum(r.quantity, r.dcq) > 0 && ctNum(r.ct, r.dc) !== null)
+      .map(r => ({ x: Math.log10(toNum(r.quantity, r.dcq)), y: ctNum(r.ct, r.dc), well: r.key || r.well, q: r.quantity }));
     const levels = new Set(pts.map(p => p.x)).size;
     if (levels < v.minStdLevels) {
       add("std_curve_insufficient", t, { wells: wl(rs), target: t, description: `Standard curve for '${t}' has ${levels} usable level(s); at least ${v.minStdLevels} are needed.`,
@@ -1335,7 +1342,7 @@ export function analyze(exp) {
   else {
     // The curves and their statistics depend only on the file, so they come from the cache while it's unchanged.
     // Numbered wells in a curve file (ViiA 7 / QuantStudio .xls, MxPro) take their positions from the results file's plate size.
-    const ampPlate = parsed.plateSize || (rows.some(r => r.key && (r.key.charCodeAt(0) > 72 || Number(r.key.slice(1)) > 12)) ? 384 : 96);
+    const ampPlate = parsed.plateSize || statedPlate(parsed) || (rows.some(r => r.key && (r.key.charCodeAt(0) > 72 || Number(r.key.slice(1)) > 12)) ? 384 : 96);
     const { ap, cs, T, gmax } = cachedCurves("amp", exp.amp.text, String(ampPlate), () => {
       const ap = parseCurves(exp.amp.text, "amp", { plateSize: ampPlate }), cs = {};
       for (const [k, pts] of Object.entries(ap.series)) cs[k] = curveStats(pts);
@@ -1408,7 +1415,7 @@ export function analyze(exp) {
   else if (!v.meltChecks) res.notAssessed.push("Melt curves: data was provided, but melt-curve checks are not enabled for this assay (More, then Method details and thresholds). PlateCheck does not assume melt analysis applies.");
   else {
     // Numbered wells in a melt file (SDS) take their positions from the results file's plate size.
-    const plate = parsed.plateSize || (rows.some(r => r.key && (r.key.charCodeAt(0) > 72 || Number(r.key.slice(1)) > 12)) ? 384 : 96);
+    const plate = parsed.plateSize || statedPlate(parsed) || (rows.some(r => r.key && (r.key.charCodeAt(0) > 72 || Number(r.key.slice(1)) > 12)) ? 384 : 96);
     const isDer = exp.melt.valueType !== "fluorescence";
     const { mp, ms } = cachedCurves("melt", exp.melt.text, `${plate}|${isDer}`, () => {
       const mp = parseCurves(exp.melt.text, "melt", { plateSize: plate }), ms = {};

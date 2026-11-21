@@ -176,3 +176,20 @@ test("decimal commas are read in tab-separated tables too", () => {
   const pt = C.parseCurves("Well\tCycle\tFluorescence\nA1\t1\t12,963\nA1\t2\t1.5\n", "amp"); // a point-decimal file keeps thousands separators
   assert.deepEqual(pt.series["A1|"], [[1, 12963], [2, 1.5]]);
 });
+
+// Small audit of the round-3 fixes (2026-11-21; platecheck-qa/audit-small/edge.mjs).
+test("decimal-comma files: quantities with thousands separators stay thousands; tab curve files with '1,250' alone too", () => {
+  const t = "Well\tSample\tTarget\tTask\tQuantity\tCq\n" + [["A1", "100,000", "18,1"], ["A2", "10,000", "21,4"], ["A3", "1,000", "24,7"], ["A4", "100", "28,0"]].map(([w, q, c]) => `${w}\tstd\tG\tStandard\t${q}\t${c}`).join("\n");
+  const e = C.newExperiment({ title: "x" }, "qa"); e.source = C.fileRecord({ name: "r", text: t, sha: "a", actor: "qa" });
+  assert.ok(Math.abs(C.analyze(e).stdCurves[0].slope + 3.3) < 1e-9); // was −0.6 (efficiency 4542%): "100,000" read as 100
+  const s = t.replace("100,000", "0,5"); const e2 = C.newExperiment({ title: "y" }, "qa"); e2.source = C.fileRecord({ name: "r", text: s, sha: "b", actor: "qa" });
+  assert.equal(C.toNum("0,5", C.analyze(e2).rows[0].dcq), 0.5); // a quantity that shows decimal commas switches them on
+  assert.deepEqual(C.parseCurves("Well\tCycle\tFluorescence\nA1\t1\t850\nA1\t2\t1,250\n", "amp").series["A1|"], [[1, 850], [2, 1250]]);
+  assert.deepEqual(C.parseCurves("Well\tCycle\tFluorescence\nA1\t1\t0,689\nA1\t2\t1,250\n", "amp").series["A1|"], [[1, 0.689], [2, 1.25]]);
+});
+test("numbered curve wells use the block type the results file states (384-well run using only A1-H12)", () => {
+  const res = "* Block Type = 384-Well Block\n[Results]\nWell\tWell Position\tSample Name\tTarget Name\tCT\n1\tA1\ts\tG\t20\n25\tB1\ts\tG\t21\n";
+  const amp = "Well\tCycle\tTarget Name\tRn\n" + [1, 25].flatMap(n => [1, 2, 3].map(c => `${n}\t${c}\tG\t${c}`)).join("\n");
+  const e = C.newExperiment({ title: "z" }, "qa"); e.source = C.fileRecord({ name: "r", text: res, sha: "d", actor: "qa" }); e.amp = C.fileRecord({ name: "a", text: amp, sha: "e", actor: "qa" });
+  assert.deepEqual(Object.keys(C.analyze(e).amp.series).sort(), ["A1|G", "B1|G"]); // well 25 was put on C1
+});

@@ -580,7 +580,7 @@ VIEWS.map = () => {
     // Samples take a muted tone per experimental group; standards get darker with more template.
     const groups = [...new Set(all.filter(r => r.role === "sample").map(r => r.group || ""))].sort((a, b) => (a === "") - (b === "") || a.localeCompare(b));
     const named = groups.filter(Boolean), tone = g => (g ? GROUP_TONES[named.indexOf(g) % GROUP_TONES.length] : "#AEB8B3");
-    const logq = r => { const q = C.toNum(r.quantity, r.dc); return q > 0 ? Math.log10(q) : null; };
+    const logq = r => { const q = C.toNum(r.quantity, r.dcq); return q > 0 ? Math.log10(q) : null; };
     const qs = all.filter(r => r.role === "standard").map(logq).filter(x => x !== null), qmin = Math.min(...qs), qmax = Math.max(...qs);
     const roleOf = k => { const rs = rows.get(k); if (!rs) return null; const set = new Set(rs.map(r => r.role)); return set.size > 1 ? "mixed" : [...set][0]; };
     const wellStyle = k => {

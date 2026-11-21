@@ -68,11 +68,11 @@ A `Tm` / `Tm1` column (and `Tm2` when the software reports a second peak) is rea
 
 Numeric wells: if the well column holds numbers (SDS 2.x), they are converted row by row using the plate size stated in the file, 384 if any number exceeds 96, or the size the user chooses in the preview (`--plate-size` in the CLI). The size is never guessed.
 
-Numbered wells in curve files: ViiA 7 / QuantStudio `.xls` “Amplification Data” sheets and MxPro instrument-data exports number the wells 1..N. They are converted with the results file's plate size (else the size the run details state, else 384 if a number exceeds 96, else 96), row by row (1 = A1, 13 = B1 on 96 wells).
+Numbered wells in curve files: ViiA 7 / QuantStudio `.xls` “Amplification Data” sheets and MxPro instrument-data exports number the wells 1..N. They are converted with the results file's plate size (its numbered wells or its stated block type, such as `Block Type = 384-Well Block`; else the size the curve file's run details state, else 384 if a number exceeds 96, else 96), row by row (1 = A1, 13 = B1 on 96 wells).
 
 Settings lines under a QuantStudio / ViiA 7 table (`Analysis Type`, `Reference Sample  b1`, …) are a footer even when a value looks like a well.
 
-Numbers: in semicolon- and tab-separated files, decimal commas (`24,31`) are read as decimals (in a tab-separated curve file only when no value uses a decimal point). Thousands separators in quantities (`12,963.927`) are accepted. Raw strings are stored unchanged.
+Numbers: in semicolon- and tab-separated files, decimal commas (`24,31`) are read as decimals (in a tab-separated curve file only when no value uses a decimal point). A value such as `1,250` or `100,000` could be either, so it never switches decimal commas on by itself: quantities are read with decimal commas only when one of them shows it (`0,5`, `12,5`), and otherwise their commas are thousands separators. Thousands separators in quantities (`12,963.927`) are accepted. Raw strings are stored unchanged.
 
 Role values: `Unkn…`/`Unknown`/`Sample` → sample, `NTC`/`No template…` → NTC, `Std…`/`Standard` → standard, `Pos…` → positive, `NRT`/`No RT`/`-RT`/`NAC` → no-RT, `Empty`/`Unused` → empty. Other values (such as `Neg Ctrl`) are not mapped and are flagged. Samples named `NTC`, `water`, `H2O`, `blank` or `no template control`, or ending in `NTC` / `no template` after a target name (`gapdh no template`), are treated as NTC, and samples whose name marks them as a no-RT control (`c1 noRT`, `c1 -RT`, `c1 RT-`, `NRT c1`, `c1 no-RT control`, `c1 minus RT`) are treated as no-RT, when there is no role column or the role is “Unknown”. The Plate page asks you to confirm these guesses; the source of the role is shown in the preview, plate map and report.
 
