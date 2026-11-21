@@ -530,8 +530,8 @@ export const FIELD_LABEL = { well: "Well", sample: "Sample", target: "Target", c
   tm: "Tm", tm2: "Tm2", chemistry: "Chemistry" };
 // Roche and some other exports name the Ct column after the dye ("Ct SYBR", "Cq FAM", "Cp SYBR Green") or write "CT Value".
 // Only a known dye (or "value") may follow, so summary columns such as "Ct Mean", "Ct SD" or "Ct Threshold" are never
-// taken for the Ct column.
-const CT_DYE_RE = /^(?:ct|cq|cp)[\s_(-]+(?:sybr(?: green(?: i)?)?|fam|vic|hex|joe|tet|rox|cy3|cy5(?:\.5)?|texas red|tamra|eva ?green|lc ?green|resolight|value)\)?$/;
+// taken for the Ct column. Agilent AriaMx / MxPro name it after the signal instead: "Cq (∆R)", "Cq (dR)", "Ct (dRn)".
+const CT_DYE_RE = /^(?:ct|cq|cp)[\s_(-]+(?:sybr(?: green(?: i)?)?|fam|vic|hex|joe|tet|rox|cy3|cy5(?:\.5)?|texas red|tamra|eva ?green|lc ?green|resolight|value|(?:∆|δ|d|delta ?)?rn?)\)?$/;
 // Well positions with a run prefix, as some SDS exports write them ("Exp2 A5"): the position is the last word.
 const PREFIXED_WELL_RE = /^(.*\S)\s+([A-Pa-p]0*[1-9]\d?)$/;
 const splitWell = w => { const m = PREFIXED_WELL_RE.exec(String(w ?? "").trim()); return m && wellKey(m[2]) ? { prefix: m[1], key: wellKey(m[2]) } : null; };
@@ -620,7 +620,10 @@ export function parseResults(input, opts = {}) {
   // Summary labels are words ("Average", "Slope"); a mistyped well is short and has a digit ("Z9", "A1O").
   const typoWell = r => { const w = (r.cells[columns.well] ?? "").trim(), c = (r.cells[columns.ct] ?? "").trim();
     return /^(?=.*\d)[A-Za-z0-9]{1,4}$/.test(w) && c !== "" && (ctNum(c) !== null || isNoAmp(c)); };
-  while (last > 0 && !wellLike(rows[last]) && !typoWell(rows[last])) last--;
+  // A settings line ("Reference Sample  b1" under a ViiA 7 / QuantStudio table whose wells are in column 2) can hold a
+  // value that looks like a well. It is short, though, and starts with a label of words, not a number.
+  const settingLine = r => columns.well > 0 && r.cells.length < need && /^[A-Za-z][A-Za-z /()-]{4,}$/.test((r.cells[0] ?? "").trim()) && !wellKey(r.cells[0]);
+  while (last > 0 && (settingLine(rows[last]) || (!wellLike(rows[last]) && !typoWell(rows[last])))) last--;
   const footer = rows.slice(last + 1);
   if (footer.length) warnings.push(`${footer.length} line(s) after the table (lines ${footer[0].line + offset}–${footer.at(-1).line + offset}) have no well position and were treated as a summary footer, not data.`);
   for (const r of rows.slice(1, last + 1)) {
@@ -642,7 +645,7 @@ export function parseResults(input, opts = {}) {
   const prefixed = out.filter(r => r.wellPrefix), prefixes = [...new Set(prefixed.map(r => r.wellPrefix))];
   if (prefixes.length) warnings.push(`Well positions carry a prefix (${prefixes.map(p => `“${p}”`).join(", ")}), as in “${prefixed[0].well}”. I read the position from the end (${prefixed[0].key}).` +
     (prefixes.length > 1 ? " Different prefixes usually mean different plates or runs: split the file by prefix and check each plate on its own, or the same position on two plates will be treated as a duplicate." : ""));
-  const decimalComma = delim === ";" && out.some(r => /^-?\d+,\d+$/.test(r.ct || ""));
+  const decimalComma = delim !== "," && out.some(r => /^-?\d+,\d+$/.test(r.ct || ""));
   if (decimalComma) {
     for (const r of out) r.dc = true;
     warnings.push("Decimal commas were detected (for example “24,31”) and are read as decimal numbers. The raw values are kept unchanged.");
@@ -722,7 +725,10 @@ export function parseCurves(input, kind, opts = {}) {
   const headerAt = rows => rows.slice(0, 500).findIndex(r => r.cells.some(c => X_ALIASES[kind].includes(normHeader(c.trim()))));
   let delim = detectDelimiter(text), all = splitDelimited(text, delim), hi = headerAt(all);
   for (const d of ["\t", ",", ";"]) { if (hi >= 0) break; if (d === delim) continue; const t = splitDelimited(text, d), h = headerAt(t); if (h >= 0) { delim = d; all = t; hi = h; } }
-  const dc = delim === ";";
+  // Decimal commas: always possible with ";"; in a tab-separated file only when values look like "21,13" and none uses a
+  // decimal point (so "12,963" thousands separators in a point-decimal file stay thousands).
+  const cells = all.slice(Math.max(0, hi) + 1, Math.max(0, hi) + 200).flatMap(r => r.cells.map(c => c.trim()));
+  const dc = delim === ";" || (delim === "\t" && cells.some(c => /^-?\d+,\d+$/.test(c)) && !cells.some(c => /^-?\d+\.\d+$/.test(c)));
   const rows = hi > 0 ? all.slice(hi) : all;
   if (rows.length < 2) throw new ParseError("The curve file has no data rows.");
   const hdr = rows[0].cells.map(s => s.trim()), norm = hdr.map(normHeader);
@@ -730,7 +736,7 @@ export function parseCurves(input, kind, opts = {}) {
   const xi = find(X_ALIASES[kind]);
   if (xi < 0) throw new ParseError(`No ${kind === "amp" ? "cycle" : "temperature"} column was found.`, { headers: hdr.filter(Boolean) });
   const wi = find([...FIELD_ALIASES.well, "samplepos"]), ti = find(FIELD_ALIASES.target);
-  const series = {}, rawSeries = {}; let malformed = 0, layout, yName, rawName = null;
+  const series = {}, rawSeries = {}; let malformed = 0, layout, yName, rawName = null, plateSize = null, plateFrom = null;
   const add = (k, x, y) => {
     const X = toNum(x, dc), Y = toNum(y, dc);
     if (X === null || Y === null) { malformed++; return; }
@@ -744,8 +750,21 @@ export function parseCurves(input, kind, opts = {}) {
     // QuantStudio/SDS exports can carry both ΔRn (used for PlateCheck's curve checks) and Rn; LinRegPCR needs the raw Rn.
     const ri = kind === "amp" && /^(delta ?rn|δrn|deltarn)$/.test(norm[yi]) ? norm.indexOf("rn") : -1;
     if (ri >= 0) rawName = hdr[ri];
-    for (const r of rows.slice(1)) {
-      const key = wellKey(r.cells[wi]);
+    // ViiA 7 / QuantStudio .xls and MxPro number the wells 1..N instead of A1. Positions then come from the plate size:
+    // the caller's (the results file's), else the one the run details state, else 384 when a number exceeds 96.
+    const body = rows.slice(1), cell = r => String(r.cells[wi] ?? "").trim();
+    const numbered = body.some(r => /^\d+$/.test(cell(r))) && !body.some(r => wellKey(cell(r)));
+    let toKey = c => wellKey(c);
+    if (numbered) {
+      const max = Math.max(...body.map(r => (/^\d+$/.test(cell(r)) ? Number(cell(r)) : 0)));
+      const stated = all.slice(0, Math.max(0, hi)).map(r => r.cells.join(" ")).join(" ").match(/\b(96|384)[- ]?well/i);
+      plateSize = opts.plateSize || (stated ? Number(stated[1]) : max > 96 ? 384 : 96);
+      plateFrom = opts.plateSize ? "results" : stated ? "stated" : "assumed";
+      const cols = plateSize === 384 ? 24 : 12;
+      toKey = c => { if (!/^\d+$/.test(c)) return null; const i = Number(c) - 1; return i >= 0 && i < plateSize ? String.fromCharCode(65 + Math.floor(i / cols)) + ((i % cols) + 1) : null; };
+    }
+    for (const r of body) {
+      const key = toKey(cell(r));
       if (!key) { malformed++; continue; }
       const k = `${key}|${ti >= 0 ? (r.cells[ti] || "").trim() : ""}`;
       add(k, r.cells[xi], r.cells[yi]);
@@ -768,7 +787,7 @@ export function parseCurves(input, kind, opts = {}) {
     }
   }
   const wells = [...new Set(Object.keys(series).map(k => k.split("|")[0]))].sort((a, b) => wellOrder(a) - wellOrder(b));
-  return { kind, layout, xName: hdr[xi], yName, series, ...(rawName ? { rawSeries, rawName } : {}), wells, malformed,
+  return { kind, layout, xName: hdr[xi], yName, series, ...(rawName ? { rawSeries, rawName } : {}), ...(plateSize ? { plateSize, plateFrom } : {}), wells, malformed,
     points: Object.values(series).reduce((a, s) => a + s.length, 0), guessedValueType, parserVersion: PARSER_VERSION };
 }
 
@@ -1315,8 +1334,10 @@ export function analyze(exp) {
   if (!exp.amp) res.notAssessed.push("Amplification curves: no amplification data was provided, so curve checks were not run.");
   else {
     // The curves and their statistics depend only on the file, so they come from the cache while it's unchanged.
-    const { ap, cs, T, gmax } = cachedCurves("amp", exp.amp.text, "", () => {
-      const ap = parseCurves(exp.amp.text, "amp"), cs = {};
+    // Numbered wells in a curve file (ViiA 7 / QuantStudio .xls, MxPro) take their positions from the results file's plate size.
+    const ampPlate = parsed.plateSize || (rows.some(r => r.key && (r.key.charCodeAt(0) > 72 || Number(r.key.slice(1)) > 12)) ? 384 : 96);
+    const { ap, cs, T, gmax } = cachedCurves("amp", exp.amp.text, String(ampPlate), () => {
+      const ap = parseCurves(exp.amp.text, "amp", { plateSize: ampPlate }), cs = {};
       for (const [k, pts] of Object.entries(ap.series)) cs[k] = curveStats(pts);
       const gmax = Math.max(0, ...Object.values(cs).map(s => s.delta));
       for (const s of Object.values(cs)) s.rises = s.delta > 0 && s.delta > Math.max(10 * s.sd, 0.05 * gmax);
@@ -1529,7 +1550,7 @@ export function nextSteps(exp, res) {
 export function decodeBytes(input) {
   const b = input instanceof Uint8Array ? input : new Uint8Array(input);
   const dec = (enc, from = 0) => new TextDecoder(enc).decode(b.subarray(from));
-  if (b[0] === 0x50 && b[1] === 0x4b && b[2] === 3 && b[3] === 4) return { binary: "zip" };      // .xlsx, .eds, .pcrd and other zipped project files
+  if (b[0] === 0x50 && b[1] === 0x4b && ((b[2] === 3 && b[3] === 4) || (b[2] === 7 && b[3] === 8))) return { binary: "zip" };  // .xlsx, .eds, .pcrd and other zipped project files; PK 07 08 = spanning marker first (Bio-Rad CFX .rdml)
   if (b[0] === 0xd0 && b[1] === 0xcf && b[2] === 0x11 && b[3] === 0xe0) return { binary: "ole" }; // old .xls
   if (b[0] === 0xff && b[1] === 0xfe) return { text: dec("utf-16le", 2), encoding: "UTF-16" };
   if (b[0] === 0xfe && b[1] === 0xff) return { text: dec("utf-16be", 2), encoding: "UTF-16" };

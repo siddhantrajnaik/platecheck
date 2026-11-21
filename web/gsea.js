@@ -1,5 +1,5 @@
 // Gene set enrichment for qPCR panels: preranked GSEA (Subramanian et al. 2005) and a competitive rank test
-// (Wilcoxon rank-sum of a set's genes against the rest of the panel, as limma's geneSetTest/wilcoxGST).
+// (Wilcoxon rank-sum of a set's genes against the rest of the panel, as limma's geneSetTest/wilcoxGST with alternative "either").
 // Pure functions with no DOM access. Method, guards and their reasons are in docs/analysis.md ("Gene set enrichment").
 //
 // A qPCR panel is a gene list somebody already picked, so every result here is relative to the panel: the
@@ -14,6 +14,9 @@ export const DEFAULT_MIN_SIZE = 3;
 export const DEFAULT_NPERM = 1000;
 export const METHODS = { auto: "Automatic (by panel size)", rank: "Rank test (Wilcoxon, set vs rest of panel)", gsea: "GSEA (preranked, gene-set permutation)" };
 export const STATS = { logp: "signed −log10 p", t: "t statistic" };
+// Ties count as "at least as extreme" on both sides (as GSEA, fgsea and gseapy). The observed and the permutation ES are
+// summed in different orders, so a tie can differ in the last bits; ES lies in [-1, 1], so 1e-12 is far below any real gap.
+const TIE = 1e-12;
 const fin = x => typeof x === "number" && Number.isFinite(x);
 const byName = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 const list = (xs, n = 8) => (xs.length > n ? `${xs.slice(0, n).join(", ")} and ${xs.length - n} more` : xs.join(", "));
@@ -188,8 +191,8 @@ export function gseaPreranked(ranked, sets, { nperm = DEFAULT_NPERM, seed = 1, w
     const mp = pos ? sp / pos : null, mnn = neg ? sn / neg : null;
     let p = null, nes = null;
     if (rs) {
-      if (rs.es >= 0) { if (pos) { let c = 0; for (const e of nul) if (e >= rs.es) c++; p = c / pos; } if (mp) nes = rs.es / mp; }
-      else { if (neg) { let c = 0; for (const e of nul) if (e < rs.es) c++; p = c / neg; } if (mnn) nes = -rs.es / mnn; }
+      if (rs.es >= 0) { if (pos) { let c = 0; for (const e of nul) if (e >= rs.es - TIE) c++; p = c / pos; } if (mp) nes = rs.es / mp; }
+      else { if (neg) { let c = 0; for (const e of nul) if (e <= rs.es + TIE) c++; p = c / neg; } if (mnn) nes = -rs.es / mnn; }
     }
     const nullNes = mp === null && mnn === null ? [] : Array.from(nul, e => (e >= 0 ? (mp ? e / mp : NaN) : (mnn ? -e / mnn : NaN))).filter(fin);
     return { name: s.name, es: rs ? rs.es : null, nes, p, nperm: nn, nullNes };
@@ -321,7 +324,7 @@ const fp = (p, nperm = 0) => (!fin(p) ? "—" : p === 0 ? (nperm ? `< ${1 / nper
 export function methodText(r) {
   return `Gene set enrichment on ${r.N} panel genes ranked by ${r.statLabel} for ${r.group} vs ${r.control} (positive = higher in ${r.group}). ` +
     (r.method === "gsea" ? `Preranked GSEA (Subramanian et al. 2005): weighted running-sum enrichment score with weight 1, NES from the mean of same-sign permutation scores, p from ${r.nperm} gene-set permutations (seed ${r.seed}), FDR q as in GSEA. `
-      : "Competitive rank test: Wilcoxon rank-sum of each set's ranking statistics against the rest of the panel, two-sided (as limma's geneSetTest), with Benjamini–Hochberg q across sets. ") +
+      : "Competitive rank test: Wilcoxon rank-sum of each set's ranking statistics against the rest of the panel, two-sided (as limma's geneSetTest with alternative “either”), with Benjamini–Hochberg q across sets. ") +
     `Sets with fewer than ${r.minSize} or more than ${r.maxSize} ranked genes were left out. The universe is the panel, not the genome.`;
 }
 export function gseaReportHtml(r, esc) {

@@ -7,6 +7,9 @@ import * as A from "../web/analysis.js";
 import * as Q from "../web/absquant.js";
 import * as R from "../web/rdml.js";
 import { reportHtml } from "../web/report.js";
+import { combat } from "../web/combat.js";
+import * as GS from "../web/gsea.js";
+import * as S from "../web/stats.js";
 
 const run = (results, amp) => {
   const e = C.newExperiment({ title: "x" }, "qa");
@@ -103,4 +106,73 @@ test("LinRegPCR target summary has null, not NaN, when no well qualifies", () =>
   const flat = Array.from({ length: 4 }, (_, k) => ({ key: `A${k + 1}`, target: "G", type: "unkn", fluor: Array.from({ length: 40 }, (_, i) => 100 + ((i * 7 + k) % 3)) }));
   const o = L.linRegPCR(flat);
   assert.equal(o.targets.G.meanEff, null); assert.equal(o.targets.G.sdEff, null); assert.equal(o.targets.G.n, 0);
+});
+
+// Third round (new published data, 2026-11-21; platecheck-qa/papers/{multiplate,stats-gsea,instruments-r3}*).
+test("ComBat leaves a target with tied values on a plate alone in every variant, as sva::ComBat does", () => {
+  const plate = ["A", "A", "A", "A", "B", "B", "B", "B"], grp = ["c", "t", "c", "t", "c", "t", "c", "t"];
+  const data = [[1, 1, 1, 1, 2, 3, 2.5, 4], [5, 6, 5.5, 6.2, 7, 8, 7.4, 8.1], [3, 2.2, 3.1, 2.6, 4, 3.3, 4.4, 3.9], [9, 9.6, 8.8, 9.9, 10.2, 11, 10.5, 11.4]];
+  for (const opts of [{}, { meanOnly: true }, { group: grp }, { group: grp, meanOnly: true }]) {
+    const r = combat(data, plate, opts);
+    assert.deepEqual(r.data[0], data[0], JSON.stringify(opts));
+    assert.ok(r.notes.some(n => /feature 1: identical values on A/.test(n)), JSON.stringify(opts));
+  }
+});
+test("GSEA p counts permutation ties on both sides: a set and its mirror image get the same p", () => {
+  const N = 20, ranked = Array.from({ length: N }, (_, i) => ({ gene: `g${i}`, value: 3 - i * 0.3 }));
+  const mirror = ranked.map((r, i) => ({ gene: r.gene, value: -ranked[N - 1 - i].value }));
+  const p = (rk, genes) => GS.gseaPreranked(rk, [{ name: "S", genes }], { nperm: 20000, seed: 7 })[0].p;
+  const up = p(ranked, ["g0", "g2", "g5"]), down = p(mirror, ["g19", "g17", "g14"]);
+  assert.ok(Math.abs(up - 0.0945) < 0.01 && Math.abs(down - 0.0945) < 0.01, `${up} ${down}`); // exact: 0.0945 (all 1140 sets); was 0.069 for the down set
+});
+test("rank tests treat values equal in the data as ties and zero differences as zeros, despite floating-point noise", () => {
+  const a = 7.08 + 1e-15, b = 7.08 - 2e-15;
+  assert.deepEqual(S.rank([a, b, 5]).ranks, [2.5, 2.5, 1]);
+  const x = [24.31, 22.5, 23.1, 25.0, 21.7, 22.9, 23.3], y = x.map((v, i) => (i === 0 ? v - (24.31 - 18.21) + 6.1 : v - 1 - i / 10));
+  const w = S.wilcoxon(x, y);
+  assert.equal(w.zeros, 1); assert.equal(w.p, 0.03125);
+});
+test("amplification sheets that number their wells (ViiA 7 / QuantStudio .xls, MxPro) are read, not dropped", () => {
+  const viia = ["Well\tCycle\tTarget Name\tRn\tDelta Rn", ...[1, 2, 13].flatMap(w => [1, 2, 3].map(c => `${w}\t${c}\tb-actin\t${(1 + c / 100).toFixed(4)}\t${(c / 100).toFixed(4)}`))].join("\n");
+  assert.equal(C.detectFileKind(viia).kind, "amp");
+  assert.deepEqual(Object.keys(C.parseCurves(viia, "amp").series).sort(), ["A1|b-actin", "A2|b-actin", "B1|b-actin"]);
+  assert.deepEqual(Object.keys(C.parseCurves(viia, "amp", { plateSize: 384 }).series).sort(), ["A13|b-actin", "A1|b-actin", "A2|b-actin"]);
+});
+test("a Bio-Rad CFX .rdml (zip starting with the PK 07 08 spanning marker) is a zip, not an unknown binary", () => {
+  assert.deepEqual(C.decodeBytes(new Uint8Array([0x50, 0x4b, 7, 8, 0x50, 0x4b, 3, 4, 0, 0, 0, 0])), { binary: "zip" });
+});
+test("RDML 1.0 (StepOne Software: free-format pcrFormat, well names as react ids) is read", async () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?><rdml xmlns="http://www.rdml.org" version="1.0">
+ <sample id="NTC_R"><type>ntc</type></sample><sample id="STD_R"><type>std</type><quantity><value>10000.0</value><unit>other</unit></quantity></sample>
+ <target id="RNase P"><type>toi</type></target>
+ <experiment id="E"><run id="R1"><pcrFormat>free format</pcrFormat>
+  <react id="A1"><sample id="NTC_R"/><data><tar id="RNase P"/><cq>-1</cq></data></react>
+  <react id="B7"><sample id="STD_R"/><data><tar id="RNase P"/><cq>27.71</cq></data></react>
+ </run></experiment></rdml>`;
+  const b = await R.readRdml("stepone.rdml", new TextEncoder().encode(xml));
+  assert.deepEqual(b.best.results.parsed.rows.map(r => r.key), ["A1", "B7"]);
+  assert.equal(b.best.results.parsed.rows[1].quantity, "10000.0");
+});
+test("Agilent AriaMx / MxPro Cq column names are recognised", () => {
+  for (const h of ["Cq (∆R)", "Cq (ΔR)", "Cq (dR)", "Ct (dRn)"]) {
+    const p = C.parseResults(`Well\tReplicate\t${h}\nA1\t1\t24.83\nA2\t1\t25.12\n`);
+    assert.deepEqual(p.rows.map(r => r.ct), ["24.83", "25.12"], h);
+  }
+  assert.throws(() => C.parseResults("Well\tCt Mean\nA1\t24.83\n")); // summary columns are still never the Ct column
+});
+test("a settings footer whose value looks like a well (Reference Sample b1) is a footer, not bad rows", () => {
+  const data = n => Array.from({ length: n }, (_, i) => `${i + 1}\tA${i + 1}\tFALSE\tb1\tb-actin\tUNKNOWN\t${(15.6 + i / 100).toFixed(2)}`);
+  const foot = ["Analysis Type\tSingleplex", "Endogenous Control\tb-actin", "RQ Min/Max Confidence Level\t95.0", "Reference Sample\tb1"];
+  for (const n of [6, 3]) {
+    const p = C.parseResults(["Well\tWell Position\tOmit\tSample Name\tTarget Name\tTask\tCT", ...data(n), ...foot].join("\n"));
+    assert.equal(p.rows.length, n); assert.equal(p.footerLines, 4); assert.equal(p.malformed.length, 0);
+  }
+});
+test("decimal commas are read in tab-separated tables too", () => {
+  const p = C.parseResults("Well\tSample\tTarget\tCq\nA1\ts\tG\t21,13\nA2\ts\tG\t20,76\n");
+  assert.equal(p.decimalComma, true); assert.equal(C.ctNum(p.rows[0].ct, p.rows[0].dc), 21.13);
+  const q = C.parseCurves("Well\tCycle\tFluorescence\nA1\t1\t0,5\nA1\t2\t1,25\n", "amp");
+  assert.deepEqual(q.series["A1|"], [[1, 0.5], [2, 1.25]]);
+  const pt = C.parseCurves("Well\tCycle\tFluorescence\nA1\t1\t12,963\nA1\t2\t1.5\n", "amp"); // a point-decimal file keeps thousands separators
+  assert.deepEqual(pt.series["A1|"], [[1, 12963], [2, 1.5]]);
 });

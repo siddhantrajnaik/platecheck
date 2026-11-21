@@ -386,11 +386,15 @@ export function dunnett(groups, control = 0) {
 
 // ---------------------------------------------------------------- rank tests
 // Average ranks (ties share the mean of their ranks) and the sizes of the tie groups.
+// Values equal in the data can differ in the last bits after arithmetic (two ΔCt of 7.08 may differ by 4e-15),
+// so ties and zeros are judged to 1e-9: far below any reading an instrument reports.
+const EPS = 1e-9;
+const same = (a, b) => Math.abs(a - b) <= EPS * Math.max(1, Math.abs(a), Math.abs(b));
 export function rank(xs) {
   const v = xs.map((x, i) => [x, i]).sort((a, b) => a[0] - b[0]), r = new Array(xs.length), ties = [];
   for (let i = 0; i < v.length;) {
     let j = i;
-    while (j + 1 < v.length && v[j + 1][0] === v[i][0]) j++;
+    while (j + 1 < v.length && same(v[j + 1][0], v[i][0])) j++;
     for (let k = i; k <= j; k++) r[v[k][1]] = (i + j) / 2 + 1;
     ties.push(j - i + 1);
     i = j + 1;
@@ -533,7 +537,7 @@ export function wilcoxon(a, b = null) {
   const d = [];
   if (b === null) for (const x of nums(a)) d.push(x);
   else for (let i = 0; i < Math.min(a?.length || 0, b?.length || 0); i++) if (fin(a[i]) && fin(b[i])) d.push(a[i] - b[i]);
-  const N = d.length, nz = d.filter(x => x !== 0), n = nz.length, zeros = N - n;
+  const N = d.length, nz = d.filter(x => !same(x, 0)), n = nz.length, zeros = N - n;
   const out = { W: null, p: null, pairs: N, zeros, n, method: null, z: null, rPlus: null, rMinus: null };
   if (N < 2) return { ...out, reason: "needs at least two complete pairs" };
   if (!n) return { ...out, reason: "every pair has the same value" };

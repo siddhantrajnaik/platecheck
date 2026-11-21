@@ -82,7 +82,7 @@ async function readAny(file) {
   const buf = await file.arrayBuffer(), d = C.decodeBytes(buf);
   // RDML (a zip with rdml_data.xml, or that XML on its own) reads like a workbook: each run is a "sheet" with results, curves and melt.
   const rdmlText = !d.binary && /<rdml[\s>]/.test(String(d.text || "").slice(0, 4000));
-  if (!rdmlText && (!d.binary || d.binary === "unknown")) return d;
+  if (!rdmlText && !/\.rdml$/i.test(file.name) && (!d.binary || d.binary === "unknown")) return d;
   if (/\.rdml$/i.test(file.name) || rdmlText) {
     const rdml = await readRdml(file.name, buf).catch(err => ({ error: err }));
     if (rdml && !rdml.error) return { workbook: rdml };

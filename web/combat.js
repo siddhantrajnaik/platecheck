@@ -92,6 +92,10 @@ export function combat(data, batch, { group = null, meanOnly = false, conv = 1e-
   const has = data.map(r => r.map(ok));
   // 1. Per feature: regression on batch + group, grand mean, pooled variance, standardised data.
   const fit = data.map((row, g) => {
+    // sva::ComBat leaves out any feature whose raw values tie within a plate, in every variant (mean-only and with a
+    // covariate too), so it is checked here on the raw values, before the model.
+    const tied = batches.filter((_, j) => { const v = row.filter((x, i) => bi[i] === j && has[g][i]); return v.length > 1 && v.every(x => x === v[0]); });
+    if (tied.length) { notes.push(`${fname(g)}: identical values on ${tied.join(", ")}, so it was left as it was.`); return null; }
     const idx = [...Array(n).keys()].filter(i => has[g][i]);
     if (idx.length < 2) return null;
     const cols = [...Array(P).keys()].filter(c => idx.some(i => design[i][c] !== 0));
@@ -113,7 +117,7 @@ export function combat(data, batch, { group = null, meanOnly = false, conv = 1e-
     const v = [...Array(n).keys()].filter(i => bi[i] === j && has[g][i]).map(i => f.s[i]);
     return v.length < 2 ? (v.length ? { short: true } : null) : { v, gHat: avg(v), dHat: meanOnly ? 1 : var1(v) };
   }));
-  // A feature with no spread at all within a plate can't be rescaled; sva::ComBat leaves such features out, and so do I.
+  // After the group term is taken out a plate can still have no spread left; it can't be rescaled, so it is left out too.
   cell.forEach((c, g) => {
     if (c && !meanOnly && c.some(x => x && !x.short && !(x.dHat > 1e-14))) {
       notes.push(`${fname(g)}: identical values on ${batches.filter((_, j) => c[j] && !c[j].short && !(c[j].dHat > 1e-14)).join(", ")}, so it was left as it was.`);
@@ -144,7 +148,8 @@ export function combat(data, batch, { group = null, meanOnly = false, conv = 1e-
       while (change > conv && iterations < maxIter) {
         gNew = gh.map((x, k) => (t2 * nn[k] * x + dOld[k] * gBar) / (t2 * nn[k] + dOld[k]));
         dNew = fs.map((g, k) => (0.5 * sum(cell[g][j].v.map(v => (v - gNew[k]) ** 2)) + b) / (nn[k] / 2 + a - 1));
-        const rel = (nw, od) => nw.map((x, k) => Math.abs(x - od[k]) / (od[k] === 0 ? 1 : Math.abs(od[k])));
+        // sva's it.sol: max(abs(new - old) / old) with the signed old value (a negative gamma gives a negative ratio).
+        const rel = (nw, od) => nw.map((x, k) => Math.abs(x - od[k]) / (od[k] === 0 ? 1 : od[k]));
         change = Math.max(...rel(gNew, gOld), ...rel(dNew, dOld));
         gOld = gNew; dOld = dNew; iterations++;
       }

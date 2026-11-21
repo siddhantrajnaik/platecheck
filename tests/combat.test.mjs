@@ -14,13 +14,13 @@ const norm = () => Math.sqrt(-2 * Math.log(1 - rnd())) * Math.cos(2 * Math.PI * 
 const avg = xs => xs.reduce((a, b) => a + b, 0) / xs.length;
 const refused = (fn, code) => assert.throws(fn, e => e instanceof CombatError && e.code === code);
 
-test("matches neuroCombat (sva::ComBat) on every reference case to 1e-6", () => {
+test("matches neuroCombat (sva::ComBat) on every reference case to 1e-12", () => {
   assert.ok(REF.cases.length >= 8);
   for (const c of REF.cases) {
     const r = combat(c.data, c.batch, { group: c.group, meanOnly: c.meanOnly });
     let worst = 0;
     c.expected.forEach((row, g) => row.forEach((v, i) => { worst = Math.max(worst, Math.abs(r.data[g][i] - v) / Math.max(1, Math.abs(v))); }));
-    assert.ok(worst < 1e-6, `${c.name}: worst relative difference ${worst}`);
+    assert.ok(worst < 1e-12, `${c.name}: worst relative difference ${worst}`);
     if (c.meanOnly) assert.ok(r.perBatch.every(b => b.deltaStar.every(d => d === null || d === 1)), `${c.name}: mean-only never rescales`);
   }
 });

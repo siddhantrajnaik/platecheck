@@ -3,7 +3,7 @@
 // and melt texts PlateCheck already reads, in the same shape as an Excel workbook (excel.js readWorkbook), so the
 // upload path, provenance and checks are the same. Export writes RDML 1.3 (validated with rdmlpython's schema check).
 // Unzip / zip: the zip code in the bundled SheetJS library (works in every browser PlateCheck supports, and in Node).
-import { detectFileKind, parseCurves, ctNum, APP_VERSION, BUILD } from "./core.js";
+import { detectFileKind, parseCurves, ctNum, wellKey, APP_VERSION, BUILD } from "./core.js";
 import { linRegPCR } from "./linreg.js"; // Cq for runs that carry raw curves only
 // Plain CSV for the texts handed to PlateCheck's own parser. Not core.toCsv: that one guards downloads against
 // spreadsheet formulas and would change a sample called "-RT" into "'-RT".
@@ -40,7 +40,10 @@ const txt = (el, name) => (kid(el, name)?.text ?? "").trim();
 // controls like an NTC; opt (optical calibrator) is not a reaction to check and is left out.
 const TYPE = { unkn: "Unknown", ntc: "NTC", nac: "NTC", ntp: "NTC", std: "Standard", pos: "Positive control", nrt: "No RT" };
 const GROUP_PROPS = /^(group|condition|biological group|biological replicate|treatment|genotype)$/i;
-const label = (fmt, n) => { // react id → well position, from pcrFormat (row and column labels "ABC", "123" or "A1a1")
+const label = (fmt, id) => { // react id → well position, from pcrFormat (row and column labels "ABC", "123" or "A1a1")
+  // RDML 1.0 (StepOne Software, say) uses the well name itself as the id ("A1") with a free-format pcrFormat.
+  if (!/^\d+$/.test(String(id).trim())) return wellKey(id) || String(id).trim();
+  const n = +id;
   const cols = +fmt.columns || 12, i = n - 1, r = Math.floor(i / cols), c = (i % cols) + 1;
   const rl = fmt.rowLabel === "123" ? String(r + 1) : String.fromCharCode(65 + r), cl = fmt.columnLabel === "ABC" ? String.fromCharCode(65 + c - 1) : String(c);
   return rl + cl;
@@ -67,7 +70,7 @@ export function rdmlRuns(xml) {
     let withCq = 0, n = 0, opt = 0, a = 0, mm = 0;
     const curves = []; // for LinRegPCR when the run has curves but no Cq
     for (const re of kids(run, "react")) {
-      const well = label(fmt, +re.attrs.id), sid = kid(re, "sample")?.attrs.id ?? "", s = samples[sid] || { type: "unkn", quantity: "", group: "" };
+      const well = label(fmt, re.attrs.id), sid = kid(re, "sample")?.attrs.id ?? "", s = samples[sid] || { type: "unkn", quantity: "", group: "" };
       if (s.type === "opt") { opt++; continue; }
       for (const d of kids(re, "data")) {
         const tar = kid(d, "tar")?.attrs.id ?? "", cqRaw = txt(d, "cq"), cq = cqRaw === "" || +cqRaw < 0 ? "Undetermined" : cqRaw, excl = txt(d, "excl");
@@ -119,7 +122,9 @@ export async function readRdml(name, bytes) {
     const sheet = `${r.experiment} / ${r.id}`, wb = { name, sheet, sha256: sha, rdml: { version: doc.version, references: r.references, warnings: r.warnings } };
     for (const [kind, text] of [["results", r.results], ["amp", r.amp], ["melt", r.melt]]) {
       if (!text) continue;
-      const k = detectFileKind(text), item = { ...k, kind: k.kind || kind, sheet, text, name: doc.runs.length > 1 ? `${name} [${sheet}]` : name, workbook: wb };
+      const k = detectFileKind(text);
+      if (kind === "results" && !k.parsed) { wb.rdml.warnings = [...(wb.rdml.warnings || []), `The results of run ${sheet} couldn't be read${k.error ? ` (${k.error.message || k.error})` : ""}.`]; continue; }
+      const item = { ...k, kind: k.kind || kind, sheet, text, name: doc.runs.length > 1 ? `${name} [${sheet}]` : name, workbook: wb };
       if (kind === "melt" && item.parsed) item.parsed.guessedValueType = "fluorescence"; // RDML mdp is raw fluorescence
       all.push(item); if (!best[kind]) best[kind] = item;
     }
