@@ -438,11 +438,13 @@ export function wellKey(w) {
   const n = Number(m[2]);
   return n >= 1 && n <= 24 ? m[1].toUpperCase() + n : null;
 }
+// Largest value in a long list. A loop, not Math.max(...xs): spreading 125,000+ values overflows the call stack.
+export const maxOf = (xs, init = -Infinity) => { let m = init; for (const x of xs) if (x > m) m = x; return m; };
 export function wellOrder(k) {
   const key = wellKey(k);
   return key ? (key.charCodeAt(0) - 65) * 100 + Number(key.slice(1)) : 1e6;
 }
-const NO_AMP = new Set(["", "undetermined", "nan", "n/a", "na", "no ct", "no cq", "-", "none", "no amp"]);
+const NO_AMP = new Set(["", "undetermined", "undet", "undet.", "nan", "n/a", "na", "n.a.", "nd", "n.d.", "not detected", "no ct", "no cq", "-", "–", "—", "--", "none", "no amp", "#n/a"]);
 // A Ct of 0 or below is no Ct: instruments write 0 (and RDML -1) for no amplification. Read as a number it would
 // wreck a standard curve and give unknowns absurd quantities.
 const notPositive = ct => { const t = String(ct).trim().replace(/^(-?\d+),(\d+)$/, "$1.$2"), n = Number(t); return t !== "" && Number.isFinite(n) && n <= 0; };
@@ -450,11 +452,11 @@ export const isNoAmp = ct => ct == null || NO_AMP.has(String(ct).trim().toLowerC
 // Parses a numeric string. dc = the file uses decimal commas (semicolon-separated exports from some locales).
 // A value that can only be a decimal comma: "0,689", "21,13", "1,5", "12345,6". "1,250" or "100,000" could be a thousands
 // separator, so on its own it doesn't show the file uses decimal commas.
-export const decimalCommaShown = v => { const t = String(v ?? "").trim(); return /^-?\d+,\d+$/.test(t) && !/^-?[1-9]\d{0,2}(,\d{3})+$/.test(t); };
+export const decimalCommaShown = v => { const t = String(v ?? "").trim(); return (/^-?\d+,\d+$/.test(t) && !/^-?[1-9]\d{0,2}(,\d{3})+$/.test(t)) || /^-?\d+,\d+[eE][+-]?\d+$/.test(t); };
 export function toNum(v, dc = false) {
   if (v == null) return null;
   let t = String(v).trim();
-  if (dc && /^-?\d+,\d+$/.test(t)) t = t.replace(",", ".");
+  if (dc && /^-?\d+,\d+([eE][+-]?\d+)?$/.test(t)) t = t.replace(",", ".");
   else if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(t)) t = t.replace(/,/g, "");
   const n = Number(t);
   return t !== "" && Number.isFinite(n) ? n : null;
@@ -590,9 +592,18 @@ export function parseResults(input, opts = {}) {
   const preamble = lines.slice(0, hi).join("\n");
   const wellCol = mapHeaders(splitDelimited(lines[hi], delim)[0].cells).columns.well;
   const isHeader = l => FIELD_ALIASES.well.includes(normHeader(splitDelimited(l, delim)[0]?.cells[wellCol]));
-  let end = lines.findIndex((l, i) => i > hi && (/^\s*\[.+\]/.test(l) || isHeader(l)));
+  // The table ends at the next [Section] line. A header repeated further down (two runs pasted into one file, or a
+  // header copied mid-table) is skipped and reported, so the rows after it are read and duplicate wells are flagged;
+  // a header with different columns starts another table, which is not read, and that is reported too.
+  let end = lines.findIndex((l, i) => i > hi && /^\s*\[.+\]/.test(l));
   if (end < 0) end = lines.length;
-  let rows = splitDelimited(lines.slice(hi, end).join("\n"), delim), offset = hi;
+  const headSig = l => (splitDelimited(l, delim)[0]?.cells || []).map(normHeader).filter(Boolean).join("|");
+  const sig0 = headSig(lines[hi]), repeatedHeaders = [];
+  // A second run pasted after the first starts with its own run details and "[Results]" line, then the same header.
+  const laterRun = end < lines.length ? lines.findIndex((l, i) => i > end && headSig(l) === sig0) : -1;
+  let otherTable = null;
+  for (let i = hi + 1; i < end; i++) if (isHeader(lines[i])) { if (headSig(lines[i]) === sig0) repeatedHeaders.push(i); else { otherTable = i; end = i; break; } }
+  let rows = splitDelimited(lines.slice(hi, end).map((l, i) => (i > 0 && repeatedHeaders.includes(hi + i) ? "" : l)).join("\n"), delim), offset = hi;
   // SDS 1.x "Ct" exports: one block per detector, each "Detector,Reporter,…" / values / "Well,SampleName,Ct" / rows.
   // Every block is read, and the detector name becomes the target (the table itself has no target column).
   const DET_RE = /^\s*detector\s*[,\t;]\s*reporter/i;
@@ -615,6 +626,8 @@ export function parseResults(input, opts = {}) {
   else if ("fluor" in columns && /^content$/i.test(names.role || "")) format = "biorad-cfx-cq";
   const width = header.cells.length, need = Math.max(columns.well, columns.ct) + 1;
   const out = [], malformed = [], warnings = [];
+  if (!blocks.length && repeatedHeaders.length) warnings.push(`The header line appears again at line${repeatedHeaders.length > 1 ? "s" : ""} ${repeatedHeaders.map(i => i + 1).join(", ")}. I skipped it and read the rows after it as well; if the file holds more than one run, check each run on its own (the same well in two runs is flagged as a duplicate).`);
+  if (!blocks.length && otherTable !== null) warnings.push(`A second table with different columns starts at line ${otherTable + 1}. Only the first table was read.`);
   // Footer: summary lines after the last row that has a well position or number (e.g. Slope / R², "Analysis Type").
   // Only a trailing block is cut, so a typo in the middle of the table is still reported, never dropped.
   const numericWells = !rows.slice(1).some(r => wellKey(r.cells[columns.well]) || splitWell(r.cells[columns.well]));
@@ -629,7 +642,18 @@ export function parseResults(input, opts = {}) {
   while (last > 0 && (settingLine(rows[last]) || (!wellLike(rows[last]) && !typoWell(rows[last])))) last--;
   const footer = rows.slice(last + 1);
   if (footer.length) warnings.push(`${footer.length} line(s) after the table (lines ${footer[0].line + offset}–${footer.at(-1).line + offset}) have no well position and were treated as a summary footer, not data.`);
+  // A file cut off mid-row (an interrupted copy or download) ends without a line break inside the last data row. With
+  // fewer cells than the row before, the row is certainly cut and is left out; otherwise its last value may be cut
+  // ("24.35" → "24"), which can't be told from the file, so it's said plainly.
+  if (laterRun >= 0 && !blocks.length) warnings.push(`The same table header appears again at line ${laterRun + 1}, after another section: the file seems to hold a second run. Only the first was read; check each run on its own.`);
+  let cutRow = null;
+  if (!/[\r\n]\s*$/.test(text) && (blocks.length || otherTable !== null || end < lines.length)) warnings.push("The file ends in the middle of a line (no line break at the end). If it was cut off, the last rows may be missing or incomplete: check the file against the instrument.");
+  else if (!/[\r\n]\s*$/.test(text) && last === rows.length - 1 && last > 1) {
+    if (rows[last].cells.length < rows[last - 1].cells.length) cutRow = rows[last];
+    else warnings.push(`The file ends in the middle of a line (no line break after the last row, line ${rows[last].line + offset}). If the file was cut off, that row's last value may be incomplete: check it against the instrument.`);
+  }
   for (const r of rows.slice(1, last + 1)) {
+    if (r === cutRow) { malformed.push({ line: r.line + offset, reason: "the file ends in the middle of this line (cut off), so it was left out", raw: r.cells.join(" | ") }); continue; }
     const line = r.line + offset;
     const extra = r.cells.slice(width).some(c => c.trim() !== "");
     if (r.cells.length < need || extra) {
@@ -662,7 +686,7 @@ export function parseResults(input, opts = {}) {
   // which is used only when the file states it, the numbers exceed 96, or the user chooses it. It is never guessed.
   let plateSize = null;
   if (out.length && out.every(r => /^\d+$/.test(r.well))) {
-    const max = Math.max(...out.map(r => Number(r.well)));
+    const max = maxOf(out.map(r => Number(r.well)));
     const stated = Object.entries(metadata).map(([k, v]) => `${k} ${v}`).join(" ").match(/\b(96|384)[- ]?well/i);
     plateSize = opts.plateSize || (stated ? Number(stated[1]) : max > 96 ? 384 : null);
     if (!plateSize) throw new ParseError(`The well column (“${names.well}”) holds numbers 1–${max} without plate positions, and the file does not state the plate size. Choose 96 or 384 wells so the numbers can be converted.`,
@@ -711,7 +735,7 @@ function parseSdsMelt(text, opts) {
   }
   const use = Object.keys(vals.der).length ? "der" : "raw", nums = Object.keys(temps).map(k => Number(k.split("|")[0]));
   if (!nums.length) throw new ParseError("The SDS melt file has no temperature rows.");
-  const size = opts.plateSize || (Math.max(...nums) > 96 ? 384 : 96), cols = size === 384 ? 24 : 12, series = {};
+  const size = opts.plateSize || (maxOf(nums) > 96 ? 384 : 96), cols = size === 384 ? 24 : 12, series = {};
   for (const [k, t] of Object.entries(temps)) {
     const y = vals[use][k]; if (!y) continue;
     const [n, dt] = k.split("|"), i = Number(n) - 1, pos = String.fromCharCode(65 + Math.floor(i / cols)) + ((i % cols) + 1);
@@ -733,7 +757,7 @@ export function parseCurves(input, kind, opts = {}) {
   // Decimal commas: always possible with ";"; in a tab-separated file only when values look like "21,13" and none uses a
   // decimal point (so "12,963" thousands separators in a point-decimal file stay thousands).
   const cells = all.slice(Math.max(0, hi) + 1, Math.max(0, hi) + 200).flatMap(r => r.cells.map(c => c.trim()));
-  const dc = delim === ";" || (delim === "\t" && cells.some(decimalCommaShown) && !cells.some(c => /^-?\d+\.\d+$/.test(c)));
+  const dc = delim === ";" || (cells.some(decimalCommaShown) && !cells.some(c => /^-?\d+\.\d+$/.test(c)));
   const rows = hi > 0 ? all.slice(hi) : all;
   if (rows.length < 2) throw new ParseError("The curve file has no data rows.");
   const hdr = rows[0].cells.map(s => s.trim()), norm = hdr.map(normHeader);
@@ -761,10 +785,11 @@ export function parseCurves(input, kind, opts = {}) {
     const numbered = body.some(r => /^\d+$/.test(cell(r))) && !body.some(r => wellKey(cell(r)));
     let toKey = c => wellKey(c);
     if (numbered) {
-      const max = Math.max(...body.map(r => (/^\d+$/.test(cell(r)) ? Number(cell(r)) : 0)));
+      const max = maxOf(body.map(r => (/^\d+$/.test(cell(r)) ? Number(cell(r)) : 0)));
       const stated = all.slice(0, Math.max(0, hi)).map(r => r.cells.join(" ")).join(" ").match(/\b(96|384)[- ]?well/i);
       plateSize = opts.plateSize || (stated ? Number(stated[1]) : max > 96 ? 384 : 96);
       plateFrom = opts.plateSize ? "results" : stated ? "stated" : "assumed";
+      if (max > plateSize) throw new ParseError(`The curve file numbers its wells up to ${max}, more than a ${plateSize}-well plate${max > 384 ? " (high-density formats such as OpenArray or 1536-well plates aren't supported)" : ""}.`, { headers: hdr.filter(Boolean) });
       const cols = plateSize === 384 ? 24 : 12;
       toKey = c => { if (!/^\d+$/.test(c)) return null; const i = Number(c) - 1; return i >= 0 && i < plateSize ? String.fromCharCode(65 + Math.floor(i / cols)) + ((i % cols) + 1) : null; };
     }
@@ -783,6 +808,10 @@ export function parseCurves(input, kind, opts = {}) {
   }
   for (const s of [...Object.values(series), ...Object.values(rawSeries)]) s.sort((a, b) => a[0] - b[0]);
   if (!Object.keys(series).length) throw new ParseError("No numeric curve values were found.", { headers: hdr.filter(Boolean) });
+  // Most values unreadable (decimal commas in a comma-separated file the delimiter guess missed, say): refuse rather
+  // than run the curve checks on the few points that happened to parse.
+  const readPts = Object.values(series).reduce((a, s) => a + s.length, 0);
+  if (malformed > readPts) throw new ParseError(`Only ${readPts} of ${readPts + malformed} curve values could be read as numbers. Check the number format (decimal commas, text cells) and export the curves again.`, { headers: hdr.filter(Boolean) });
   let guessedValueType = null;
   if (kind === "melt") {
     if (layout === "long") guessedValueType = /deriv|df\/dt|d\(rfu\)|rn'/i.test(yName) ? "derivative" : "fluorescence";
@@ -796,12 +825,15 @@ export function parseCurves(input, kind, opts = {}) {
     points: Object.values(series).reduce((a, s) => a + s.length, 0), guessedValueType, parserVersion: PARSER_VERSION };
 }
 
-function curveStats(pts) {
-  let base = pts.filter(p => p[0] >= 3 && p[0] <= 15);
+// Baseline: cycles 3–15, or up to 3 cycles before the reported Ct when that comes earlier (a curve rising before
+// cycle 15 would otherwise put its own exponential phase into the "baseline noise").
+function curveStats(pts, end = 15) {
+  let base = pts.filter(p => p[0] >= 3 && p[0] <= end);
+  if (base.length < 3 && end < 15) { base = pts.filter(p => p[0] <= end); if (base.length < 3) base = pts.slice(0, 3); }
   if (base.length < 3) base = pts.slice(0, Math.max(3, Math.floor(pts.length / 4)));
   const s = stats(base.map(p => p[1]));
   const mean = s.mean ?? 0, sd = s.sd ?? 0;
-  return { mean, sd, delta: Math.max(...pts.map(p => p[1])) - mean };
+  return { mean, sd, delta: maxOf(pts.map(p => p[1])) - mean };
 }
 function crossing(pts, mean, T) {
   const from = pts.findIndex(p => p[0] >= 3);
@@ -811,6 +843,9 @@ function crossing(pts, mean, T) {
   }
   return null;
 }
+// A second melt peak must stand at least this share of the main peak's height above the valley between them
+// (10%: single-product chipPCR plates, Rödiger 2013, have background wiggles of median 0.5%, 95th percentile 3–7%).
+const MELT_MIN_PROMINENCE = 0.1;
 function meltStats(pts, isDerivative) {
   let d = isDerivative ? pts.map(p => [p[0], p[1]]) : pts.map((p, i) => {
     const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
@@ -818,7 +853,16 @@ function meltStats(pts, isDerivative) {
   });
   d = d.map((p, i) => [p[0], (d[Math.max(0, i - 1)][1] + p[1] + d[Math.min(d.length - 1, i + 1)][1]) / 3]);
   const peaks = [];
-  for (let i = 1; i < d.length - 1; i++) if (d[i][1] > d[i - 1][1] && d[i][1] >= d[i + 1][1]) peaks.push({ t: d[i][0], h: d[i][1] });
+  // Prominence: how far a peak stands above the higher of the two valleys that separate it from a taller peak (or the
+  // curve's end). An intercalating dye's −dF/dT has a sloping background at 30–45% of the product peak; its wiggles are
+  // local maxima of great height but almost no prominence, so they are not products.
+  const prom = i => {
+    const h = d[i][1]; let l = h, r = h;
+    for (let j = i - 1; j >= 0 && d[j][1] <= h; j--) l = Math.min(l, d[j][1]);
+    for (let j = i + 1; j < d.length && d[j][1] <= h; j++) r = Math.min(r, d[j][1]);
+    return h - Math.max(l, r);
+  };
+  for (let i = 1; i < d.length - 1; i++) if (d[i][1] > d[i - 1][1] && d[i][1] >= d[i + 1][1]) peaks.push({ t: d[i][0], h: d[i][1], prom: prom(i) });
   peaks.sort((a, b) => b.h - a.h);
   return { curve: d, main: peaks[0] || null, peaks };
 }
@@ -920,12 +964,14 @@ function cleanValues(v) {
 export const ANALYSIS_TESTS = ["welch", "student", "paired", "wilcoxon", "tukey", "gameshowell", "dunnett", "mannwhitney", "kruskal"];
 export function cleanAnalysisSettings(a) {
   if (!isObj(a)) return null;
-  const names = v => (Array.isArray(v) ? [...new Set(v.filter(x => typeof x === "string" && x.trim()).map(x => x.slice(0, 200)))].slice(0, 100) : []);
+  // Lists are capped only against corrupt saved data. Wells left out can be a whole 384-well plate × several targets,
+  // so that cap is high: a lower one silently put typed-in wells back into the statistics.
+  const names = (v, max = 100) => (Array.isArray(v) ? [...new Set(v.filter(x => typeof x === "string" && x.trim()).map(x => x.slice(0, 200)))].slice(0, max) : []);
   const shift = a.refMaxShift;
   return { on: a.on === true, refs: names(a.refs), control: asStr(a.control).slice(0, 200), efficiency: a.efficiency === true,
     effSource: a.effSource === "linreg" ? "linreg" : "std", // efficiencies for the Pfaffl correction: standard curves, or LinRegPCR on the amplification curves (web/linreg.js)
     error: ["sem", "ci"].includes(a.error) ? a.error : "sd", correction: a.correction === "bonferroni" ? "bonferroni" : "bh", skipOmitted: a.skipOmitted !== false,
-    excluded: names(a.excluded), scale: a.scale === "linear" ? "linear" : "log2", test: ANALYSIS_TESTS.includes(a.test) ? a.test : "welch",
+    excluded: names(a.excluded, 50000), scale: a.scale === "linear" ? "linear" : "log2", test: ANALYSIS_TESTS.includes(a.test) ? a.test : "welch",
     refMaxShift: typeof shift === "number" && Number.isFinite(shift) && shift > 0 && shift <= 10 ? shift : 0.5,
     twoWay: ["factor2", "plate"].includes(a.twoWay) ? a.twoWay : "", // second factor for a two-way ANOVA; "" = none
     refCandidates: names(a.refCandidates), // candidate reference genes for the geNorm / NormFinder card (web/refgenes.js)
@@ -1219,8 +1265,11 @@ export function analyze(exp) {
   const expected = CTRL.filter(c => v[c[1]]).map(c => c[2]);
   res.checksRun.push(`Controls: expected for every target: ${expected.join(", ") || "none"}; behaviour of all NTC, positive and no-RT wells present (NTC rated high below Ct ${v.ntcCtThreshold}` + (v.nrtMargin > 0 ? `; an amplifying no-RT should trail its samples by ${v.nrtMargin} cycles)` : ")"));
   for (const c of CTRL) if (!v[c[1]]) res.notAssessed.push(`${c[2]}s: not expected by the selected rule set, so their absence is not flagged. Any that are present are still checked.`);
+  // One pass over the rows (target × role), not one per target: on a 9,216-well chip the per-target scans took most
+  // of the time of every re-analysis.
+  const byTR = groupBy(active, r => `${r.target}\n${r.role}`), wsOf = (t, role) => byTR.get(`${t}\n${role}`) || [];
   for (const t of targets) for (const [role, flag, label] of CTRL) {
-    const ws = active.filter(r => r.target === t && r.role === role), na = exp.controlNA?.[`${role}|${t}`];
+    const ws = wsOf(t, role), na = exp.controlNA?.[`${role}|${t}`];
     res.controls.push({ target: t, role, label, expected: !!v[flag], wells: wl(ws), na: na ? na.reason : null,
       amplified: ws.filter(r => ctNum(r.ct, r.dc) !== null).map(r => `${name(r)} (Ct ${r.ct})`) });
     if (v[flag] && !ws.length) {
@@ -1240,13 +1289,13 @@ export function analyze(exp) {
         description: `Positive control ${name(r)} for '${t}' did not amplify.`, evidence: `source line ${r.line}; raw Ct ${fmtRaw(r.ct)}`,
         next_check: "Check the positive control template and the reaction setup before interpreting negatives for this target." });
       if (role === "nrt" && c !== null) {
-        const sc = active.filter(x => x.target === t && x.role === "sample").map(x => ctNum(x.ct, x.dc)).filter(x => x !== null);
+        const sc = wsOf(t, "sample").map(x => ctNum(x.ct, x.dc)).filter(x => x !== null);
         const minS = sc.length ? Math.min(...sc) : null;
         add("nrt_amplification", r.line, { ...at(r), uncertain: true, description: `No-RT control ${name(r)} for '${t}' amplified (Ct ${r.ct}).`,
           evidence: `source line ${r.line}` + (minS !== null ? `; ${(c - minS).toFixed(1)} cycles after the earliest sample well (Ct ${minS})` : ""),
           next_check: "Assess possible genomic DNA contribution, for example DNase treatment or intron-spanning primers." });
         // Margin to the samples this no-RT controls: the sample it was made from if the names say so, otherwise the whole target.
-        const samples = active.filter(x => x.target === t && x.role === "sample" && ctNum(x.ct, x.dc) !== null);
+        const samples = wsOf(t, "sample").filter(x => ctNum(x.ct, x.dc) !== null);
         const names = new Set([nrtBaseName(r.sample), (r.bioSource === "file" || r.bioSource === "user") && r.bio_unit ? String(r.bio_unit).toLowerCase() : ""].filter(Boolean));
         const own = samples.filter(x => names.has(String(x.sample ?? "").toLowerCase()) || names.has(String(x.bio_unit ?? "").toLowerCase()));
         const used = own.length ? own : samples;
@@ -1346,7 +1395,7 @@ export function analyze(exp) {
     const { ap, cs, T, gmax } = cachedCurves("amp", exp.amp.text, String(ampPlate), () => {
       const ap = parseCurves(exp.amp.text, "amp", { plateSize: ampPlate }), cs = {};
       for (const [k, pts] of Object.entries(ap.series)) cs[k] = curveStats(pts);
-      const gmax = Math.max(0, ...Object.values(cs).map(s => s.delta));
+      const gmax = maxOf(Object.values(cs).map(s => s.delta), 0);
       for (const s of Object.values(cs)) s.rises = s.delta > 0 && s.delta > Math.max(10 * s.sd, 0.05 * gmax);
       const T = 0.1 * (median(Object.values(cs).filter(s => s.rises).map(s => s.delta)) ?? 0);
       for (const [k, s] of Object.entries(cs)) s.est = s.rises && T > 0 ? crossing(ap.series[k], s.mean, T) : null;
@@ -1356,7 +1405,7 @@ export function analyze(exp) {
     res.checksRun.push(`Amplification curves (${Object.keys(ap.series).length} curves): rise above baseline vs reported Ct/Cq; Ct/Cq vs a common threshold crossing (tolerance ${v.ctTolerance} cycles around the plate median offset)`);
     const byWell = groupBy(Object.keys(ap.series), k => k.split("|")[0]);
     const tw = groupBy(active.filter(r => r.key), r => r.key);
-    const missing = [], ambiguous = [], diffs = [];
+    const missing = [], ambiguous = [], diffs = [], matched = [];
     for (const r of active) {
       if (!r.key) continue;
       const exact = `${r.key}|${r.target ?? ""}`;
@@ -1368,14 +1417,26 @@ export function analyze(exp) {
       }
       if (!k) { missing.push(r); continue; }
       r.ampKey = k;
-      const s = cs[k], c = ctNum(r.ct, r.dc);
+      const c = ctNum(r.ct, r.dc);
+      matched.push({ r, k, c, s: c !== null && c < 18 ? curveStats(ap.series[k], c - 3) : cs[k] });
+    }
+    // The rise floor (5% of the largest rise) and the common threshold are per target: dyes and channels differ in
+    // brightness many-fold, so a dim channel must not be judged against a bright one.
+    const perT = new Map();
+    for (const [t, ms] of groupBy(matched, m => m.r.target ?? "")) {
+      const tmax = maxOf(ms.map(m => m.s.delta), 0);
+      const rises = m => m.s.delta > 0 && m.s.delta > Math.max(10 * m.s.sd, 0.05 * tmax);
+      perT.set(t, { tmax, T: 0.1 * (median(ms.filter(rises).map(m => m.s.delta)) ?? 0), rises });
+    }
+    for (const { r, k, c, s } of matched) {
+      const P = perT.get(r.target ?? ""), up = P.rises({ s }), est = up && P.T > 0 ? crossing(ap.series[k], s.mean, P.T) : null;
       const curve = `baseline mean ${s.mean.toFixed(3)} (SD ${s.sd.toFixed(3)}), maximum rise ${s.delta.toFixed(3)}`;
-      if (c !== null && !s.rises) add("amp_ct_without_rise", r.line, { ...at(r), description: `Well ${name(r)} reports Ct ${r.ct} but its curve does not rise above baseline noise.`,
-        evidence: `${curve}; rise needs > ${Math.max(10 * s.sd, 0.05 * gmax).toFixed(3)} (10 × baseline SD or 5% of the largest rise on the plate)`,
+      if (c !== null && !up) add("amp_ct_without_rise", r.line, { ...at(r), description: `Well ${name(r)} reports Ct ${r.ct} but its curve does not rise above baseline noise.`,
+        evidence: `${curve}; rise needs > ${Math.max(10 * s.sd, 0.05 * P.tmax).toFixed(3)} (10 × baseline SD or 5% of the largest rise for ${r.target ? `'${r.target}'` : "this plate"})`,
         next_check: "Inspect the raw curve and the instrument's baseline and threshold settings for this well." });
-      else if (isNoAmp(r.ct) && s.rises) add("amp_rise_without_ct", r.line, { ...at(r), description: `Well ${name(r)} has no Ct/Cq (${fmtRaw(r.ct)}) but its curve rises.`,
-        evidence: `${curve}; curve crosses PlateCheck's threshold at cycle ${f2(s.est)}`, next_check: "Check the instrument's threshold and baseline for this well and target." });
-      else if (c !== null && s.est !== null) diffs.push([r, c - s.est, s.est]);
+      else if (isNoAmp(r.ct) && up) add("amp_rise_without_ct", r.line, { ...at(r), description: `Well ${name(r)} has no Ct/Cq (${fmtRaw(r.ct)}) but its curve rises.`,
+        evidence: `${curve}; curve crosses PlateCheck's threshold at cycle ${f2(est)}`, next_check: "Check the instrument's threshold and baseline for this well and target." });
+      else if (c !== null && est !== null) diffs.push([r, c - est, est, P.T]);
     }
     if (missing.length) add("amp_curve_missing", "all", { wells: wl(missing), lines: ln(missing),
       description: `${missing.length} used well(s) have no amplification curve; curve checks were not run for them.`,
@@ -1383,11 +1444,14 @@ export function analyze(exp) {
     if (ambiguous.length) add("amp_curve_ambiguous", "all", { wells: wl(ambiguous), lines: ln(ambiguous),
       description: `${ambiguous.length} well/target combination(s) could not be matched to a single curve.`,
       evidence: `wells ${wl(ambiguous).join(", ")}`, next_check: "Export curves with a target column for multiplexed wells." });
-    const med = median(diffs.map(d => d[1]));
-    for (const [r, d, est] of diffs) if (Math.abs(d - med) > v.ctTolerance)
-      add("amp_ct_inconsistent", r.line, { ...at(r), uncertain: true, description: `Reported Ct for ${name(r)} is ${Math.abs(d - med).toFixed(1)} cycles from where its curve suggests.`,
-        evidence: `reported Ct ${r.ct}; curve crosses ${T.toFixed(3)} above baseline at cycle ${est.toFixed(2)}; offset ${d.toFixed(2)} vs plate median offset ${med.toFixed(2)}`,
-        next_check: "Compare this well's curve with its replicates, and check for per-well baseline settings." });
+    // Offsets are compared within a target: the instrument sets its threshold per target, so the offset is per target too.
+    for (const [t, ds] of groupBy(diffs, d => d[0].target ?? "")) {
+      const med = median(ds.map(d => d[1]));
+      for (const [r, d, est, Tt] of ds) if (Math.abs(d - med) > v.ctTolerance)
+        add("amp_ct_inconsistent", r.line, { ...at(r), uncertain: true, description: `Reported Ct for ${name(r)} is ${Math.abs(d - med).toFixed(1)} cycles from where its curve suggests.`,
+          evidence: `reported Ct ${r.ct}; curve crosses ${Tt.toFixed(3)} above baseline at cycle ${est.toFixed(2)}; offset ${d.toFixed(2)} vs median offset ${med.toFixed(2)}${t ? ` for '${t}'` : ""}`,
+          next_check: "Compare this well's curve with its replicates, and check for per-well baseline settings." });
+    }
   }
 
   // Tm reported in the results file itself (a "Tm" / "Tm1" column, and "Tm2" when the software found a second peak).
@@ -1444,9 +1508,9 @@ export function analyze(exp) {
             evidence: `largest peak height ${s.main.h.toFixed(3)} vs target median ${medH.toFixed(3)} (needs ≥ 20%)`, next_check: "Inspect the amplification and melt curves together." });
           continue;
         }
-        const sec = s.peaks.filter(p => p !== s.main && Math.abs(p.t - s.main.t) >= v.meltPeakSeparation && p.h >= v.meltSecondaryRatio * s.main.h);
-        if (sec.length) add("melt_multiple_peaks", r.line, { ...at(r), uncertain: true, description: `Well ${name(r)} has ${sec.length + 1} melt peaks.`,
-          evidence: `main peak ${s.main.t.toFixed(1)} °C (height ${s.main.h.toFixed(3)}); secondary ${sec.map(p => `${p.t.toFixed(1)} °C (${(p.h / s.main.h * 100).toFixed(0)}%)`).join(", ")}`,
+        const sec = s.peaks.filter(p => p !== s.main && Math.abs(p.t - s.main.t) >= v.meltPeakSeparation && p.h >= v.meltSecondaryRatio * s.main.h && p.prom >= MELT_MIN_PROMINENCE * s.main.h);
+        if (sec.length) add("melt_multiple_peaks", r.line, { ...at(r), uncertain: true, description: `Well ${name(r)} may have ${sec.length === 1 ? "a second melt peak" : `${sec.length} more melt peaks`}.`,
+          evidence: `main peak ${s.main.t.toFixed(1)} °C (height ${s.main.h.toFixed(3)}); secondary ${sec.map(p => `${p.t.toFixed(1)} °C (height ${(p.h / s.main.h * 100).toFixed(0)}%, standing ${(p.prom / s.main.h * 100).toFixed(0)}% above its valley)`).join(", ")}`,
           next_check: "Check for non-specific products or primer-dimer, for example on a gel or with a primer redesign." });
         if (Math.abs(s.main.t - medTm) > v.meltTmTolerance + 1e-9) add("melt_tm_deviation", r.line, { ...at(r),
           description: `Melt Tm for ${name(r)} is ${s.main.t.toFixed(2)} °C; the median for '${t}' is ${medTm.toFixed(2)} °C.`,

@@ -1,7 +1,7 @@
 // Reads Excel workbooks (.xlsx, .xls, .ods) by turning each sheet into tab-separated text,
 // so the normal parsers read it exactly as they read a CSV export.
 // SheetJS (vendor/xlsx.mjs, Apache-2.0) is only loaded when someone actually drops a workbook.
-import { detectFileKind } from "./core.js";
+import { detectFileKind, wellKey } from "./core.js";
 
 let lib = null;
 const load = async () => (lib ||= await import("./vendor/xlsx.mjs"));
@@ -32,10 +32,11 @@ function sheetText(X, ws) {
     for (let C = r.s.c; C <= r.e.c; C++) row.push(cellText(X, ws[X.utils.encode_cell({ r: R, c: C })]));
     // Table rows keep their empty trailing cells, so a well whose last column (CFX Cq) is empty doesn't look like a
     // cut-off line; short metadata rows ("Run date", value) are trimmed as before.
-    if (row.filter(c => c !== "").length < 3) while (row.length && row[row.length - 1] === "") row.pop();
+    // A row that starts with a well position is a table row even with few cells ("A3, s1, <empty Ct>").
+    if (row.filter(c => c !== "").length < 3 && !wellKey(row.find(c => c !== ""))) while (row.length && row[row.length - 1] === "") row.pop();
     if (row.some(c => c !== "")) lines.push(row.join("\t"));
   }
-  return lines.join("\n");
+  return lines.length ? lines.join("\n") + "\n" : "";
 }
 
 // Every sheet that has something in it, as text. Returns null when the bytes are not a workbook

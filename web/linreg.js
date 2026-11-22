@@ -158,7 +158,7 @@ const CRIT_EFF = [28, 28, 19, 16, 14, 12, 11, 11, 10, 10, 9], CRIT_N0 = [40, 40,
 export function linRegPCR(curves, { effRange = 0.05 } = {}) {
   const R = curves.length;
   if (!R) return null;
-  const n = Math.max(...curves.map(c => c.fluor.length));
+  let n = 0; for (const c of curves) if (c.fluor.length > n) n = c.fluor.length;
   if (n < 10) return null;
   const raw = curves.map(c => { const a = new Float64Array(n).fill(NaN); c.fluor.forEach((v, i) => { if (v !== null && v !== undefined && v !== "") a[i] = +v; }); return a; });
   const type = curves.map(c => c.type || "unkn"), chem = curves.map(c => c.chemistry || "non-saturating DNA binding dye"), nucl = curves.map(c => c.nucleotide || "cDNA");
@@ -480,12 +480,21 @@ export function curvesFrom(res, { chemistry = {} } = {}) {
 // LinRegPCR for an analysed run, cached per analysis result (about 0.1 s for a 384-well plate). null without curves.
 // Adds what the app needs to judge the input: whether the curves look baseline-subtracted (ΔRn), and the instrument Cq.
 const CACHE = new WeakMap();
+// Every click on Review makes a new analysis result, but the curves (the same series object while the file is
+// unchanged) and what LinRegPCR needs from the rows (target, role, exclusion, chemistry) rarely change. So the fit is
+// cached on the series with a signature of those inputs; only the cheap per-result details are redone.
+const FIT = new WeakMap();
 export function forRun(res) {
   if (!res?.amp?.series) return null;
   if (CACHE.has(res)) return CACHE.get(res);
   const curves = curvesFrom(res).filter(c => c.fluor.some(v => Number.isFinite(v)));
-  let out = null;
-  try { out = curves.length ? linRegPCR(curves) : null; } catch { out = null; }
+  const src = res.amp.rawSeries || res.amp.series, sig = curves.map(c => `${c.key}|${c.target}|${c.type}|${c.excluded}|${c.chemistry}`).join("\n");
+  let fit = FIT.get(src)?.sig === sig ? FIT.get(src).fit : undefined;
+  if (fit === undefined) {
+    try { fit = curves.length ? linRegPCR(curves) : null; } catch { fit = null; }
+    FIT.set(src, { sig, fit });
+  }
+  const out = fit && { ...fit, rows: fit.rows.map(w => ({ ...w })), warnings: [...fit.warnings] };
   if (out) {
     const used = res.amp.rawName || res.amp.yName || "";
     if (res.amp.rawName) out.notes = [`Used the “${res.amp.rawName}” column (raw) rather than “${res.amp.yName}”, which is baseline-subtracted.`];

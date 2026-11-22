@@ -189,7 +189,7 @@ The Analysis step's "Reference gene stability" card ranks candidate reference ge
 
 ## Several plates (a study)
 
-"Combine plates" in the sidebar groups saved runs into a study. Studies are saved in your browser like runs. Biological units with the same name on different plates are treated as the same biological sample. After the plate correction their values are averaged across those plates, so each unit counts once in n and in every test, never once per plate. The app says so whenever it happens.
+"Combine plates" in the sidebar groups saved runs into a study. Studies are saved in your browser like runs. Biological units with the same name on different plates are treated as the same biological sample. After the plate correction their values are averaged across those plates, so each unit counts once in n and in every test, never once per plate. When every plate that holds a target also holds the reference genes, the target's ΔCt is taken on each plate against that plate's own references and then averaged, so a plate without the target (another gene run with its own reference wells) can't change its result. Otherwise the plate means are used. The app says so whenever it happens.
 
 "Download study report (HTML)" at the bottom of the study view gives one file with the method in words, the plates, the correction used with its shifts and warnings, the results table, the graphs as inline SVG, the notes and the references for the methods that were used. It uses the same styles as the run report.
 

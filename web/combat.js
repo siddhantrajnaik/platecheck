@@ -29,7 +29,8 @@ const uniq = xs => [...new Set(xs)];
 export function rank(rows, tol = 1e-9) {
   const m = rows.map(r => r.slice());
   const nr = m.length, nc = nr ? m[0].length : 0;
-  const scale = Math.max(1, ...m.flat().map(Math.abs));
+  let scale = 1; // a loop, not Math.max(...): a 64-plate study has a 6,080 × 65 design, too many arguments for one call
+  for (const row of m) for (const x of row) if (Math.abs(x) > scale) scale = Math.abs(x);
   let r = 0;
   for (let c = 0; c < nc && r < nr; c++) {
     let p = r;

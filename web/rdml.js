@@ -3,7 +3,7 @@
 // and melt texts PlateCheck already reads, in the same shape as an Excel workbook (excel.js readWorkbook), so the
 // upload path, provenance and checks are the same. Export writes RDML 1.3 (validated with rdmlpython's schema check).
 // Unzip / zip: the zip code in the bundled SheetJS library (works in every browser PlateCheck supports, and in Node).
-import { detectFileKind, parseCurves, ctNum, wellKey, APP_VERSION, BUILD } from "./core.js";
+import { detectFileKind, parseCurves, ctNum, wellKey, decodeBytes, APP_VERSION, BUILD } from "./core.js";
 import { linRegPCR } from "./linreg.js"; // Cq for runs that carry raw curves only
 // Plain CSV for the texts handed to PlateCheck's own parser. Not core.toCsv: that one guards downloads against
 // spreadsheet formulas and would change a sample called "-RT" into "'-RT".
@@ -108,9 +108,10 @@ export function rdmlRuns(xml) {
 export async function readRdml(name, bytes) {
   const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   let xml;
-  if (b[0] !== 0x50 || b[1] !== 0x4b) { // not a zip: maybe the XML itself
-    if (!/<rdml[\s>]/.test(new TextDecoder().decode(b.subarray(0, 4000)))) return null;
-    xml = new TextDecoder().decode(b);
+  if (b[0] !== 0x50 || b[1] !== 0x4b) { // not a zip: maybe the XML itself (UTF-8, or UTF-16 as Windows tools save it)
+    const d = decodeBytes(b);
+    if (d.binary || !/<rdml[\s>]/.test(String(d.text).slice(0, 4000))) return null;
+    xml = d.text;
   } else {
     const X = await load();
     try { const z = X.CFB.read(b, { type: "array" }), e = z.FileIndex.find(f => /\.xml$/i.test(f.name) && f.content?.length); xml = e && new TextDecoder().decode(e.content); } catch { return null; }

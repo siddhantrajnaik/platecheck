@@ -126,6 +126,12 @@ function plateSvg(res, exp) {
   return s + "</svg>";
 }
 
+// Large runs (a Biomark chip has 9,216 wells and can raise 3,000 findings) would make a PDF of thousands of pages that
+// takes minutes and gigabytes to build in the browser. Above these sizes the long lists are summarised, and the full
+// lists stay in the HTML report and the CSV downloads.
+export const PDF_MAX_FINDINGS = 200, PDF_MAX_ROWS = 1536;
+const groupCount = fs => { const m = new Map(); for (const f of fs) { if (!m.has(f.rule)) m.set(f.rule, []); m.get(f.rule).push(f); } return m; };
+const tooLong = (what, n, where) => ({ text: `${n} ${what}: too long for a PDF. They are in ${where}.`, style: "muted", margin: [0, 0, 0, 8] });
 export function reportPdfDoc(exp, res, { generatedAt = new Date().toISOString() } = {}) {
   const s = res.summary, rv = exp.reviews || {}, rs = exp.ruleset, sev = s.bySeverity || {}, p = res.parsed;
   const main = res.findings.filter(f => f.category !== "missing_context" && f.severity !== "info");
@@ -175,7 +181,10 @@ export function reportPdfDoc(exp, res, { generatedAt = new Date().toISOString() 
 
     // ---- findings
     { ...heading("Findings", sec), pageBreak: "before" },
-    main.length ? main.map(finding) : { text: "None.", margin: [0, 0, 0, 8] },
+    main.length ? main.slice(0, PDF_MAX_FINDINGS).map(finding) : { text: "None.", margin: [0, 0, 0, 8] },
+    main.length > PDF_MAX_FINDINGS ? [{ text: `${main.length - PDF_MAX_FINDINGS} more findings, by kind`, style: "h3" },
+      { text: `A PDF of ${main.length} findings would be thousands of pages, so the first ${PDF_MAX_FINDINGS} are given in full and the rest are counted here. Every finding, with its wells, evidence and decision, is in the HTML report and in “Download flags (CSV)”.`, style: "muted", margin: [0, 0, 0, 4] },
+      table(["Finding", "Severity", "Count", "Not reviewed"], [...groupCount(main.slice(PDF_MAX_FINDINGS))].map(([, g]) => [g[0].title, g[0].severity, g.length, g.filter(f => !reviewOf(rv, f)?.disposition || reviewOf(rv, f).disposition === "unreviewed").length]), { widths: ["*", 60, 40, 60] })] : [],
     orphan.length ? [{ text: "Earlier decisions on findings that no longer appear", style: "h3" }, { text: "For example after a plate-map correction.", style: "muted" },
       bullets(orphan.map(([, r]) => `${r.title || ""}: ${DISPOSITION_LABEL[r.disposition]} by ${r.by} on ${when(r.at)}${r.note ? `. ${r.note}` : ""}`))] : [],
 
@@ -206,6 +215,7 @@ export function reportPdfDoc(exp, res, { generatedAt = new Date().toISOString() 
     Object.keys(exp.controlNA || {}).length ? [{ text: "Controls marked not applicable", style: "h3" }, bullets(Object.entries(exp.controlNA).map(([k, v]) => { const [role, t] = k.split("|"); return `${ROLE_LABEL[role]} for ${t}: ${v.reason} (${v.by})`; }))] : [],
 
     heading("Technical replicates", sec),
+    res.replicateGroups.length > PDF_MAX_ROWS ? tooLong("replicate sets", res.replicateGroups.length, "the HTML report and “Download well data (CSV)”") :
     table(["Biological unit", "Group", "Target", "Wells", "Ct/Cq as exported", "Mean", "SD"], res.replicateGroups.map(g => [g.unit, g.group, g.target, g.wells.join(", "), g.raw_ct.map(x => x ?? "(empty)").join(", "), num(g.mean), num(g.sd, 3)]), { widths: ["*", "auto", "auto", "auto", "auto", "auto", "auto"], mono: [4] }),
     { text: `Wells sharing a biological unit and target are technical repeats, not separate biological samples. Biological units per group: ${res.bioSummary.map(b => `${b.group || "no group"} / ${b.target}: ${b.units.length}`).join("; ") || "none"}.`, style: "muted" },
 
@@ -223,6 +233,7 @@ export function reportPdfDoc(exp, res, { generatedAt = new Date().toISOString() 
 
     // ---- appendices
     { ...heading("Plate map", sec), pageBreak: "before" },
+    res.rows.length > PDF_MAX_ROWS ? tooLong("plate-map rows", res.rows.length, "the HTML report and “Download well data (CSV)”") :
     table(["Well", "Sample", "Target", "Group", "Role", "Biological unit", "Quantity", "Ct/Cq", "Changed from file"], res.rows.map(r => {
       const edited = Object.keys(exp.map?.[r.id] || {}).map(k => `${FIELD_LABEL[k] || k} was “${r.file[k] ?? ""}”`).join("; ");
       return [r.key || r.well, r.sample, r.target, r.group, ROLE_LABEL[r.role] + (r.roleSource.startsWith("inferred") ? " (from name)" : ""), r.bio_unit, r.quantity, r.ct ?? "(empty)", edited];
@@ -274,12 +285,12 @@ async function load() {
   if (lib) return lib;
   if (!globalThis.pdfMake) await new Promise((ok, fail) => { const s = document.createElement("script"); s.src = here("./vendor/pdfmake.min.js"); s.onload = ok; s.onerror = () => fail(new Error("Couldn't load the PDF library.")); document.head.append(s); });
   const pm = globalThis.pdfMake, F = "./fonts/pdf/";
-  const files = { "Plex-Regular.woff": "IBMPlexSans-Regular.woff", "Plex-SemiBold.woff": "IBMPlexSans-SemiBold.woff", "Plex-Italic.woff": "IBMPlexSans-Italic.woff", "Plex-SemiBoldItalic.woff": "IBMPlexSans-SemiBoldItalic.woff", "PlexMono-Regular.woff": "IBMPlexMono-Regular.woff" };
+  const files = { "Plex-Regular.ttf": "IBMPlexSans-Regular.ttf", "Plex-SemiBold.ttf": "IBMPlexSans-SemiBold.ttf", "Plex-Italic.ttf": "IBMPlexSans-Italic.ttf", "Plex-SemiBoldItalic.ttf": "IBMPlexSans-SemiBoldItalic.ttf", "PlexMono-Regular.ttf": "IBMPlexMono-Regular.ttf" };
   const vfs = {};
   await Promise.all(Object.entries(files).map(async ([k, f]) => { const r = await fetch(here(F + f)); if (!r.ok) throw new Error(`Couldn't load the font ${f}.`); const b = new Uint8Array(await r.arrayBuffer()); let s = ""; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000)); vfs[k] = btoa(s); }));
   pm.addVirtualFileSystem(vfs);
-  pm.addFonts({ Plex: { normal: "Plex-Regular.woff", bold: "Plex-SemiBold.woff", italics: "Plex-Italic.woff", bolditalics: "Plex-SemiBoldItalic.woff" },
-    Mono: { normal: "PlexMono-Regular.woff", bold: "PlexMono-Regular.woff", italics: "PlexMono-Regular.woff", bolditalics: "PlexMono-Regular.woff" } });
+  pm.addFonts({ Plex: { normal: "Plex-Regular.ttf", bold: "Plex-SemiBold.ttf", italics: "Plex-Italic.ttf", bolditalics: "Plex-SemiBoldItalic.ttf" },
+    Mono: { normal: "PlexMono-Regular.ttf", bold: "PlexMono-Regular.ttf", italics: "PlexMono-Regular.ttf", bolditalics: "PlexMono-Regular.ttf" } });
   return (lib = pm);
 }
 export async function reportPdf(exp, res) {
