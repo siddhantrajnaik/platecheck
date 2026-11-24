@@ -177,7 +177,7 @@ ${table(["When", "Who", "What"], exp.audit.map(a => [when(a.at), a.actor, a.deta
 <h2>Limits of this report</h2>
 <ul>${LIMITATIONS.map(l => `<li>${esc(l)}</li>`).join("")}</ul>
 ${exp.feedback ? `<p class="sub">Asked whether this review was useful: ${esc(exp.feedback.value.toLowerCase())}.</p>` : ""}
-<footer>Made with PlateCheck ${esc(APP_VERSION)} (build ${esc(BUILD)}), by ${esc(CREDIT.name)}, ${esc(CREDIT.affiliation)}. Questions: <a href="mailto:${esc(CREDIT.email)}">${esc(CREDIT.email)}</a>${CREDIT.linkedin ? ` or <a href="${esc(CREDIT.linkedin)}">LinkedIn</a>` : ""}.</footer>
+<footer>Made with PlateCheck ${esc(APP_VERSION)} beta (build ${esc(BUILD)}), by ${esc(CREDIT.name)}, ${esc(CREDIT.affiliation)}. Questions: <a href="mailto:${esc(CREDIT.email)}">${esc(CREDIT.email)}</a>${CREDIT.linkedin ? ` or <a href="${esc(CREDIT.linkedin)}">LinkedIn</a>` : ""}.</footer>
 </body></html>`;
 }
 
@@ -213,7 +213,7 @@ ${svgs.length ? `<h2>Graphs</h2>${svgs.map(s => `<div style="overflow-x:auto;mar
 
 <h2>References</h2>
 <ol class="refs">${(a.ok ? analysisReferences(a) : []).map(r => `<li>${esc(r.text)} <a href="https://doi.org/${esc(r.doi)}">doi:${esc(r.doi)}</a></li>`).join("")}</ol>
-<footer>Made with PlateCheck ${esc(APP_VERSION)} (build ${esc(BUILD)}), by ${esc(CREDIT.name)}, ${esc(CREDIT.affiliation)}. Questions: <a href="mailto:${esc(CREDIT.email)}">${esc(CREDIT.email)}</a>.</footer>
+<footer>Made with PlateCheck ${esc(APP_VERSION)} beta (build ${esc(BUILD)}), by ${esc(CREDIT.name)}, ${esc(CREDIT.affiliation)}. Questions: <a href="mailto:${esc(CREDIT.email)}">${esc(CREDIT.email)}</a>.</footer>
 </body></html>`;
 }
 

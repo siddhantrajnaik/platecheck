@@ -131,7 +131,8 @@ function goStudy() { Object.assign(st, { exp: null, res: null, pending: {}, sel:
 function renderSidebar() {
   const list = S.index();
   put($("#side"),
-    h("button", { class: "brand", type: "button", onclick: goHome, title: "Home" }, plateArt(2, 3, { A1: "--accent", A2: "--accent", B1: "--accent", B2: "--w-high" }, 4.4), h("span", { class: "wordmark" }, "PlateCheck")),
+    h("button", { class: "brand", type: "button", onclick: goHome, title: "Home" }, plateArt(2, 3, { A1: "--accent", A2: "--accent", B1: "--accent", B2: "--w-high" }, 4.4), h("span", { class: "wordmark" }, "PlateCheck"),
+      h("span", { class: "beta", title: "PlateCheck is new. Compare its results with your own analysis before you rely on them, and email me any file it gets wrong." }, "Beta")),
     h("button", { class: "btn primary", type: "button", onclick: goHome }, "Check a new run"),
     h("button", { class: "btn", type: "button", onclick: goStudy }, "Combine plates"), // analysis module
     h("h2", { class: "side-h" }, "Your runs"),
@@ -227,6 +228,8 @@ function home() {
         h("h1", null, "Check your qPCR run before you trust the numbers"),
         h("p", { class: "lede" }, "PlateCheck reads the export from your qPCR machine and catches the boring mistakes: a mislabelled well, an NTC that came up, replicates that don't agree, a missing control. Then, if you want, it works out the fold changes and statistics and draws the graphs."),
         CREDIT.bio && h("p", { class: "lede" }, CREDIT.bio),
+        h("p", { class: "beta-note" }, h("span", { class: "beta" }, "Beta"), " PlateCheck has been checked against published data and other software, but it is new. Compare its results with your own analysis before you rely on them, and ",
+          h("a", { href: `mailto:${CREDIT.email}?subject=PlateCheck%20beta`, class: "link" }, "email me"), " any file it reads wrongly."),
         bigDrop(),
         h("div", { class: "home-alt" },
           h("button", { class: "link", type: "button", onclick: loadDemo }, "No file handy? Try it with a sample run"),

@@ -37,6 +37,12 @@ p { margin: 0 0 .75rem; } ul, ol { margin: 0; }
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand .plate-art { width: 34px; height: auto; }
 .wordmark { font-size: 1.15rem; font-weight: 600; letter-spacing: -0.01em; }
+/* beta label: a small outlined tag, in the accent colour, next to the name and in the home-page note */
+.beta { display: inline-block; font-size: .62rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; line-height: 1;
+  padding: 3px 5px 2px; border: 1px solid var(--accent); border-radius: 3px; color: var(--accent); vertical-align: middle; }
+.brand .beta { align-self: center; }
+.beta-note { font-size: .86rem; color: var(--muted); margin: .2rem 0 1rem; }
+.beta-note .beta { margin-right: 6px; vertical-align: 1px; }
 .side-actions { display: grid; gap: 8px; }
 .side-h { font-size: .85rem; font-weight: 600; color: var(--muted); }
 .explist { display: grid; gap: 2px; margin-top: -10px; }
