@@ -278,6 +278,9 @@ async function quickFiles(fileList) {
     else if (d.workbook) {
       const picked = Object.values(d.workbook.best);
       if (picked.length) items.push(...picked); else emptyBooks.push({ name: d.file.name });
+      // No results sheet could be read, but some sheets look like results ("Cq Results"): say why each failed,
+      // instead of "these look like curve files".
+      if (!d.workbook.best.results) for (const s of d.workbook.all || []) if (!s.kind && s.error && /result|c[tq]\b/i.test(s.workbook?.sheet || "")) emptyBooks.push({ name: s.name, error: s.error });
     }
   }
   for (const i of items) i.sha = await C.sha256(i.text);
@@ -322,7 +325,7 @@ function quickNote() {
   if (!q || q.id !== st.exp.id || !st.exp.source) return null;
   return h("div", { class: "quick-note" },
     h("p", null, `Read ${q.rows} rows from ${q.files[0]}` + (q.curvesOf?.length ? `, with its ${q.curvesOf.join(" and ")} curves` : q.files.length > 1 ? `, plus the curves in ${q.files.slice(1).join(" and ")}` : "") + "." +
-      (q.melt ? ` Melt values were read as ${q.melt}; if that's wrong, change it on the Upload page.` : "") + (q.skipped.length ? ` I couldn't read ${q.skipped.join(", ")}, so it was left out.` : "")),
+      (q.melt ? ` Melt values were read as ${q.melt === "derivative" ? "a derivative (−dF/dT)" : "raw fluorescence"}; if that's wrong, change “These values are” on the melt file's card on the Upload page.` : "") + (q.skipped.length ? ` I couldn't read ${q.skipped.join(", ")}, so it was left out.` : "")),
     (q.rdml || []).map(t => h("p", { class: "warn-line" }, t)),
     q.otherSheets?.why ? h("p", { class: "warn-line" }, q.otherSheets.why) : q.otherSheets && h("p", { class: "warn-line" }, `Check the sheet: this workbook has other sheets that also look like results (${q.otherSheets.others.map(s => `“${s}”`).join(", ")}). I used “${q.otherSheets.used}”. If that's the wrong one, open the Upload page, click Replace and pick the right sheet.`),
     h("div", { class: "row" },
@@ -524,7 +527,11 @@ VIEWS.data = () => {
           cur.workbook ? h("button", { class: "btn", type: "button", title: "The sheet exactly as PlateCheck read it, as tab-separated text", onclick: () => download(`${noExt(cur.workbook.name)} - ${cur.workbook.sheet}.txt`, cur.text, "text/plain") }, "Download sheet as text")
             : h("button", { class: "btn", type: "button", onclick: () => download(cur.name, cur.text, "text/plain") }, "Download original"),
           h("label", { class: "btn" }, "Replace", h("input", { type: "file", accept: ACCEPT, onchange: ev => stage(kind, ev.target.files[0]) })),
-          kind !== "results" && h("button", { class: "btn", type: "button", onclick: () => removeFile(kind) }, "Remove"))),
+          kind !== "results" && h("button", { class: "btn", type: "button", onclick: () => removeFile(kind) }, "Remove"),
+          // The melt value type is guessed on import; this is where the quick note sends the user to correct it.
+          kind === "melt" && h("label", { class: "fine" }, "These values are ", h("select", { onchange: ev => { const v = ev.target.value; change("file.melt_type", `Melt values set to ${v}`, () => { st.exp.melt.valueType = v; }); } },
+            h("option", { value: "derivative", selected: cur.valueType === "derivative" }, "Derivative (−dF/dT)"),
+            h("option", { value: "fluorescence", selected: cur.valueType === "fluorescence" }, "Raw fluorescence (PlateCheck computes −dF/dT)"))))),
       p ? preview(kind, p) : cur ? null : (kind === "results" || st.exp.source) ? dropzone(kind, "Choose file") : h("p", { class: "fine" }, "Add the results file first."));
   });
   return [...cards, card(h("h2", null, "Which files work"),
@@ -916,7 +923,8 @@ VIEWS.findings = () => {
   const list = sorted(res.findings).filter(f => (!st.hideClosed || !C.CLOSED.has(C.reviewOf(st.exp.reviews, f)?.disposition)) &&
     (!st.category || f.category === st.category) &&
     (!q || [f.rule, f.title, f.description, f.evidence, f.wells.join(" "), f.target, f.sample].join(" ").toLowerCase().includes(q)));
-  if (!st.selFinding) { const first = sorted(res.findings).find(f => needsLook(f) && isOpen(f)) || list[0]; if (first) selectFinding(first, { render: false }); }
+  // Open the first flag only when nothing is selected: a well clicked on the plate (no flag, one well) must stay shown.
+  if (!st.selFinding && !st.sel.size) { const first = sorted(res.findings).find(f => needsLook(f) && isOpen(f)) || list[0]; if (first) selectFinding(first, { render: false }); }
   const sel = st.selFinding && res.findings.find(f => f.id === st.selFinding);
   const major = list.filter(needsLook), minor = list.filter(f => !needsLook(f));
   const selRows = res.rows.filter(r => st.sel.has(r.key));
@@ -925,9 +933,10 @@ VIEWS.findings = () => {
     h("section", { class: "sec summary" },
       quickNote(),
       h("p", { class: "tally" }, (() => {
-        const hi = sev.high || 0, md = sev.medium || 0, mn = (sev.low || 0) + (sev.info || 0);
-        const parts = [hi && `${hi} need${hi === 1 ? "s" : ""} a look`, md && `${md} worth checking`, mn && `${mn} minor note${mn === 1 ? "" : "s"}`].filter(Boolean);
-        return parts.length ? `${parts.length > 1 ? parts.slice(0, -1).join(", ") + " and " + parts.at(-1) : parts[0]}. You've gone through ${sum.reviewed} of ${sum.total}.` : "Nothing was flagged.";
+        // Informational notes don't need a decision, so they are counted apart from the total to go through.
+        const hi = sev.high || 0, md = sev.medium || 0, mn = sev.low || 0, inf = sev.info || 0;
+        const parts = [hi && `${hi} need${hi === 1 ? "s" : ""} a look`, md && `${md} worth checking`, mn && `${mn} minor note${mn === 1 ? "" : "s"}`, inf && `${inf} for information`].filter(Boolean);
+        return parts.length ? `${parts.length > 1 ? parts.slice(0, -1).join(", ") + " and " + parts.at(-1) : parts[0]}.` + (sum.total ? ` You've gone through ${sum.reviewed} of the ${sum.total} that need a decision.` : "") : "Nothing was flagged.";
       })()),
       h("details", { class: "scope" }, h("summary", null, `What was checked: ${res.checksRun.length} groups of checks, ${res.notAssessed.length} item${res.notAssessed.length === 1 ? "" : "s"} not assessed`),
         h("div", { class: "scope-cols" },
@@ -1060,7 +1069,7 @@ VIEWS.report = () => {
           const b = e.currentTarget, name = `${base}-report.pdf`;
           b.disabled = true; b.textContent = "Making the PDF…";
           try { download(name, await reportPdf(st.exp, st.res), "application/pdf"); log("Report (PDF)", name, true); }
-          catch (err) { b.disabled = false; b.textContent = "Download report (PDF)"; flash(`Couldn't make the PDF (${err.message}). The HTML report under Other formats has the same content.`); }
+          catch (err) { b.disabled = false; b.textContent = "Download report (PDF)"; flash(`Couldn't make the PDF (${err.message}). The HTML report under Other formats has the same content.`, true); renderMain(); }
         } }, "Download report (PDF)")),
       h("details", { class: "other-formats" }, h("summary", null, "Other formats"),
         h("div", { class: "exports" },
@@ -1069,8 +1078,9 @@ VIEWS.report = () => {
           box("Flags (CSV)", "One row per flag with the evidence and your decision.", "Download flags (CSV)", go("Findings", `${base}-flags.csv`, () => R.findingsCsv(st.exp, st.res), "text/csv")),
           box("RDML", "The run in the standard qPCR data format (RDML 1.3: plate, samples, targets, Cq and raw curves), for RDML-Tools, LinRegPCR and other qPCR software.", "Download RDML", async () => {
             const name = `${base}.rdml`, notes = rdmlNotes(st.exp, st.res);
-            download(name, await rdmlZip(st.exp, st.res), "application/zip"); log("RDML", name, true);
-            if (notes.length) flash(`RDML saved. Not in the file: ${notes.join(" ")}`); }),
+            download(name, await rdmlZip(st.exp, st.res), "application/zip");
+            if (notes.length) flash(`RDML saved. Not in the file: ${notes.join(" ")}`); // before the re-render, so it shows now
+            log("RDML", name, true); }),
           box("Results (JSON)", "Everything above in one structured file, for scripts.", "Download JSON", go("Structured results", `${base}-results.json`, () => R.structuredJson(st.exp, st.res), "application/json")),
           box("Whole run (packet)", "The run with its original files and history. Open it here again later with “Open a run you saved earlier”.", "Download packet", go("Experiment packet", `${base}.platecheck.json`, () => R.packetJson(st.exp, st.res), "application/json"))))),
     miqeCard(base, log),

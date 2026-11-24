@@ -52,7 +52,14 @@ export function plateRecords(res, settings, plate = "", calibrators = []) {
   const seen = new Map();
   for (const r of res?.rows || []) if (r.role !== "empty" && r.target) { const k = `${r.key || r.well}\u0000${r.target}`; seen.set(k, (seen.get(k) || 0) + 1); }
   const dup = [];
-  for (const r of res?.rows || []) {
+  // A unit labelled with several groups is usually a repeated measure: the same animal or patient at several time
+  // points or treatments. Merging its groups would average them, so each unit × group stays a sample of its own
+  // ("m1 · T0") and the unit becomes its pair label, which is what a paired test needs.
+  const groupsOf = new Map();
+  for (const r of res?.rows || []) if (r.role === "sample" && r.target && r.bio_unit && r.group) { if (!groupsOf.has(r.bio_unit)) groupsOf.set(r.bio_unit, new Set()); groupsOf.get(r.bio_unit).add(r.group); }
+  const repeated = new Set([...groupsOf].filter(([, gs]) => gs.size > 1).map(([u]) => u));
+  for (const row of res?.rows || []) {
+    const r = row.role === "sample" && repeated.has(row.bio_unit) && row.group ? { ...row, bio_unit: `${row.bio_unit} · ${row.group}`, pair: row.pair || row.bio_unit } : row;
     if (r.role !== "sample" || !r.target || !r.bio_unit) continue;
     const well = r.key || r.well;
     if (seen.get(`${well}\u0000${r.target}`) > 1) { dup.push(`${well} (${r.target})`); continue; }
@@ -72,8 +79,7 @@ export function plateRecords(res, settings, plate = "", calibrators = []) {
     by.get(k).tech.push({ ct, well, plate });
   }
   for (const u of ungrouped) if (unitGroups.has(u)) ungrouped.delete(u);
-  for (const [u, gs] of unitGroups) if (gs.size > 1)
-    out.warnings.push(`${plate ? `${plate}: ` : ""}biological unit ${u} is labelled with more than one group (${[...gs].join(", ")}). I used ${[...gs][0]}; fix the labels in the plate map.`);
+  if (repeated.size) out.warnings.push(`${plate ? `${plate}: ` : ""}${repeated.size} biological unit(s) appear in more than one group (${list([...repeated].map(u => `${u}: ${[...groupsOf.get(u)].join(", ")}`))}), as in a time course on the same animals. I kept each group's wells apart (for example “${[...repeated][0]} · ${[...groupsOf.get([...repeated][0])][0]}”) and used the unit as their pair label, so the paired test compares the groups within each unit. If these are different animals that share a name, give them distinct biological units in the plate map.`);
   for (const [u, ps] of unitPairs) if (ps.size > 1 && TESTS[s.test].paired)
     out.warnings.push(`${plate ? `${plate}: ` : ""}biological unit ${u} has more than one pair label (${[...ps].join(", ")}). I used ${[...ps][0]}.`);
   for (const rec of by.values()) {
@@ -453,6 +459,11 @@ export function compute(records, settings, { stdCurves = [], plates = [""], cali
     rows.forEach((x, i) => { x[k].pBH = bh[i]; x[k].pBonferroni = bf[i]; });
   }
 
+  // The design and the test should agree: matched units need a paired test, and the across-groups table is never a
+  // repeated-measures test.
+  const hasPairs = [...units.values()].some(u => u.pair);
+  if (hasPairs && !TESTS[s.test].paired) warnings.push(`The biological units carry pair labels (matched samples, such as the same animal before and after), but the chosen test (${TESTS[s.test].short}) treats them as independent. If the samples are matched, choose the paired t-test or the Wilcoxon signed-rank test.`);
+  if (TESTS[s.test].paired && base.anova.length) warnings.push("The one-way ANOVA across all groups treats every unit as independent; it is not a repeated-measures test and ignores the pairs. For matched units, read the paired comparisons with the control.");
   const small = base.summary.filter(r => r.n < MIN_N);
   if (small.length) warnings.push(`Fewer than ${MIN_N} biological replicates in: ${list(small.map(r => `${r.group} / ${r.target} (n = ${r.n})`))}. With so few, the test has little power and the p value is unreliable` +
     (small.some(r => r.n < 2) ? "; groups with one replicate get no p value at all" : "") + (TESTS[s.test].rank ? ". Rank tests have even less power than t-tests with groups this small" : "") + ".");

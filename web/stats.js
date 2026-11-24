@@ -650,6 +650,9 @@ export function twoWayAnova(y, a, b, { interaction = true } = {}) {
   const dummies = (f, levels) => levels.slice(1).map(l => f.map(x => (x === l ? 1 : 0)));
   const A = dummies(fa, la), B = dummies(fb, lb), AB = A.flatMap(ca => B.map(cb => ca.map((v, i) => v * cb[i])));
   const cells = new Set(fa.map((x, i) => `${x}\u0000${fb[i]}`));
+  // Every group sits in one level of the second factor ("WT-low", "WT-high" … as groups, strain as the second
+  // factor): the factor is already inside the group labels, so it has nothing to explain.
+  if (cells.size === la.length) return { ...out, reason: "the second factor doesn't vary within the groups: each group belongs to a single level of it, so it is already part of the group labels. Use one factor as the group (for example genotype) and the other as the second factor (for example strain)" };
   let inter = interaction;
   if (inter && cells.size < la.length * lb.length) { inter = false; out.notes.push("some combinations of the two factors have no values, so the interaction can't be estimated and was left out"); }
   if (inter && N - la.length * lb.length < 1) { inter = false; out.notes.push("with one value per combination nothing is left to estimate the error once the interaction is in, so the interaction was left out"); }

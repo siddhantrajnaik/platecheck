@@ -444,7 +444,7 @@ export function wellOrder(k) {
   const key = wellKey(k);
   return key ? (key.charCodeAt(0) - 65) * 100 + Number(key.slice(1)) : 1e6;
 }
-const NO_AMP = new Set(["", "undetermined", "undet", "undet.", "nan", "n/a", "na", "n.a.", "nd", "n.d.", "not detected", "no ct", "no cq", "-", "–", "—", "--", "none", "no amp", "#n/a"]);
+const NO_AMP = new Set(["", "undetermined", "undet", "undet.", "nan", "n/a", "na", "n.a.", "nd", "n.d.", "not detected", "no ct", "no cq", "-", "–", "—", "--", "none", "no amp", "#n/a", "null", "non numérique", "non numerique", "n. def.", "n.def.", "n. def", "n.def", "nicht def."]);
 // A Ct of 0 or below is no Ct: instruments write 0 (and RDML -1) for no amplification. Read as a number it would
 // wreck a standard curve and give unknowns absurd quantities.
 const notPositive = ct => { const t = String(ct).trim().replace(/^(-?\d+),(\d+)$/, "$1.$2"), n = Number(t); return t !== "" && Number.isFinite(n) && n <= 0; };
@@ -516,8 +516,8 @@ const FIELD_ALIASES = {
   well: ["well position", "well", "pos", "position"],
   sample: ["sample", "sample name", "samplename", "name"],
   target: ["target", "target name", "detector", "detector name", "gene", "assay"],
-  ct: ["ct", "cq", "cт", "c_t", "crt", "cp"],
-  role: ["role", "task", "content", "type"],
+  ct: ["ct", "cq", "cт", "c_t", "crt", "cp", "c_"], // "C_": StepOne Software writes CT with a subscript T that some exports turn into "_"
+  role: ["role", "task", "content", "type", "sample type"],
   quantity: ["quantity", "starting quantity (sq)", "sq", "qty"],
   group: ["group", "condition", "biological group", "biological set name"],
   bio_unit: ["bio_unit", "biological unit", "biological replicate", "bio rep"],
@@ -540,11 +540,12 @@ const CT_DYE_RE = /^(?:ct|cq|cp)[\s_(-]+(?:sybr(?: green(?: i)?)?|fam|vic|hex|jo
 // Well positions with a run prefix, as some SDS exports write them ("Exp2 A5"): the position is the last word.
 const PREFIXED_WELL_RE = /^(.*\S)\s+([A-Pa-p]0*[1-9]\d?)$/;
 const splitWell = w => { const m = PREFIXED_WELL_RE.exec(String(w ?? "").trim()); return m && wellKey(m[2]) ? { prefix: m[1], key: wellKey(m[2]) } : null; };
-const normHeader = h => String(h ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+// Underscores count as spaces ("well_position", "Sample_Name" in R and Python exports).
+const normHeader = h => String(h ?? "").trim().toLowerCase().replace(/[\s_]+/g, " ");
 function mapHeaders(headers) {
   const norm = headers.map(normHeader), columns = {}, names = {};
   for (const [field, aliases] of Object.entries(FIELD_ALIASES))
-    for (const a of aliases) { const i = norm.indexOf(a); if (i >= 0) { columns[field] = i; names[field] = headers[i].trim(); break; } }
+    for (const a of aliases) { const i = norm.indexOf(normHeader(a)); if (i >= 0) { columns[field] = i; names[field] = headers[i].trim(); break; } }
   if (!("ct" in columns)) { const i = norm.findIndex(n => CT_DYE_RE.test(n)); if (i >= 0) { columns.ct = i; names.ct = headers[i].trim(); } }
   const used = new Set(Object.values(columns));
   // The same column name twice (two "Ct" columns, say): the first is used and the parser warns. Different names for one
@@ -564,20 +565,29 @@ export function parseResults(input, opts = {}) {
   if (!text.trim()) throw new ParseError("The file is empty.");
   const lines = text.split(/\r\n|\r|\n/).map(l => l.replace(/^﻿/, ""));
   // Instrument exports often put a metadata preamble before the table, so search for the header row.
-  let hi = -1, delim = ",", firstCells = null;
-  for (let i = 0; i < Math.min(lines.length, 500); i++) {
+  let hi = -1, delim = ",", firstCells = null, firstScore = -1;
+  // The first 500 lines, and 500 lines after a later "[Results]" line: a QuantStudio "export all" text file puts the
+  // results table after thousands of lines of amplification and melt data.
+  const resultsAt = lines.findIndex((l, i) => i >= 500 && /^\s*\[results\]/i.test(l));
+  const scan = [...Array(Math.min(lines.length, 500)).keys(), ...(resultsAt >= 0 ? Array.from({ length: Math.min(500, lines.length - resultsAt) }, (_, k) => resultsAt + k) : [])];
+  for (const i of scan) {
     const l = lines[i];
     if (!l.trim() || /^\s*\*/.test(l) || /^\s*\[.+\]/.test(l)) continue;
     const d = detectDelimiter(l), cells = splitDelimited(l, d)[0]?.cells;
     if (!cells || cells.filter(c => c.trim()).length < 2) continue;
-    firstCells ||= cells;
     const m = mapHeaders(cells);
+    // For the error message, the row that looks most like the header (not the first line of run details).
+    const score = Object.keys(m.columns).length + ("well" in m.columns || "ct" in m.columns ? 10 : 0);
+    if (!firstCells || score > firstScore) { firstCells = cells; firstScore = score; }
     if ("well" in m.columns && "ct" in m.columns) { hi = i; delim = d; break; }
   }
   if (hi < 0) {
     const m = firstCells ? mapHeaders(firstCells) : { columns: {}, names: {} };
     const missing = ["well", "ct"].filter(f => !(f in m.columns));
-    throw new ParseError(`Required column(s) not found: ${missing.map(f => FIELD_LABEL[f]).join(", ")}. No row in the first 500 lines has both a well and a Ct/Cq column.`,
+    const meanOnly = (firstCells || []).map(c => c.trim()).find(c => /^c[tqp][\s_]*mean$/i.test(c));
+    throw new ParseError(`Required column(s) not found: ${missing.map(f => FIELD_LABEL[f]).join(", ")}. ` + (missing.includes("ct") && meanOnly
+      ? `The file has a “${meanOnly}” column (the mean of replicate wells) but no Ct/Cq for each well; export the per-well results (a “Ct” or “Cq” column).`
+      : "No row in the first 500 lines has both a well and a Ct/Cq column."),
       { recognized: m.names, headers: (firstCells || []).map(s => s.trim()).filter(Boolean) });
   }
   const metadata = {};
@@ -640,6 +650,9 @@ export function parseResults(input, opts = {}) {
   // value that looks like a well. It is short, though, and starts with a label of words, not a number.
   const settingLine = r => columns.well > 0 && r.cells.length < need && /^[A-Za-z][A-Za-z /()-]{4,}$/.test((r.cells[0] ?? "").trim()) && !wellKey(r.cells[0]);
   while (last > 0 && (settingLine(rows[last]) || (!wellLike(rows[last]) && !typoWell(rows[last])))) last--;
+  // Nothing in the table looks like a well (chamber ids, "A01-Ch5"): that's not a footer but an unknown well format.
+  // Keep the rows so the message says what the well column holds, instead of "no data rows".
+  if (last === 0 && rows.length > 3) last = rows.length - 1;
   const footer = rows.slice(last + 1);
   if (footer.length) warnings.push(`${footer.length} line(s) after the table (lines ${footer[0].line + offset}–${footer.at(-1).line + offset}) have no well position and were treated as a summary footer, not data.`);
   // A file cut off mid-row (an interrupted copy or download) ends without a line break inside the last data row. With
@@ -669,6 +682,21 @@ export function parseResults(input, opts = {}) {
       bio_unit: get("bio_unit"), pair: get("pair"), factor2: get("factor2"), fluor: get("fluor"), omit: /^(true|yes|1)$/i.test(get("omit") || "") || /^(false|no|0)$/i.test(get("include") || ""),
       tm: get("tm"), tm2: get("tm2"), chemistry: get("chemistry") });
   }
+  // A multiplex export with no target names (qTOWER, CFX Maestro with an empty Target column): the dye is what tells
+  // the reactions of one well apart, so it becomes the target, rather than every well reading as a duplicate.
+  // ROX is the passive reference dye: a row of its own with no target and no Cq, next to the real reaction in the same
+  // well, is not a result (it would read as a missing Ct in every well).
+  const multiDye = new Set([...groupBy(out.filter(r => r.fluor && r.key), r => r.key)].filter(([, rs]) => new Set(rs.map(r => r.fluor)).size > 1).map(([k]) => k));
+  const rox = out.filter(r => !r.target && /^rox$/i.test(r.fluor || "") && multiDye.has(r.key) && ctNum(r.ct) === null);
+  if (rox.length) {
+    const drop = new Set(rox); for (let i = out.length - 1; i >= 0; i--) if (drop.has(out[i])) out.splice(i, 1);
+    warnings.push(`${rox.length} ROX row(s) without a Cq were left out: ROX is the passive reference dye, not a target.`);
+  }
+  const dyeWells = new Set([...groupBy(out.filter(r => !r.target && r.fluor && r.key), r => r.key)].filter(([, rs]) => new Set(rs.map(r => r.fluor)).size > 1).map(([k]) => k));
+  if (dyeWells.size) {
+    for (const r of out) if (!r.target && r.fluor && dyeWells.has(r.key)) r.target = r.fluor;
+    warnings.push(`The file has no target names, but ${dyeWells.size} well(s) hold reactions in several dyes (${[...new Set(out.filter(r => dyeWells.has(r.key)).map(r => r.fluor))].join(", ")}). I used the dye as the target; rename the targets in the plate map.`);
+  }
   const prefixed = out.filter(r => r.wellPrefix), prefixes = [...new Set(prefixed.map(r => r.wellPrefix))];
   if (prefixes.length) warnings.push(`Well positions carry a prefix (${prefixes.map(p => `“${p}”`).join(", ")}), as in “${prefixed[0].well}”. I read the position from the end (${prefixed[0].key}).` +
     (prefixes.length > 1 ? " Different prefixes usually mean different plates or runs: split the file by prefix and check each plate on its own, or the same position on two plates will be treated as a duplicate." : ""));
@@ -680,6 +708,12 @@ export function parseResults(input, opts = {}) {
     warnings.push("Decimal commas were detected (for example “24,31”) and are read as decimal numbers" + (dcq ? "" : "; quantities have none, so a comma there (“100,000”) is a thousands separator") + ". The raw values are kept unchanged.");
   }
   if (!out.length && !malformed.length) throw new ParseError("The header was found but there are no data rows.", { recognized: names, headers, format });
+  // No row has a plate position, and they aren't numbered wells or 1536-well positions (those get their own handling):
+  // a high-density chip (Fluidigm Biomark chamber ids such as "A11a1", OpenArray). Checking 40,000 unplaceable rows one
+  // by one would only bury the user in findings, so the file is refused with the reason.
+  const big1536 = w => /^[A-Za-z]{1,2}0*[1-9]\d?$/.test(w);
+  if (out.length >= 20 && !out.some(r => r.key) && !out.every(r => /^\d+$/.test(r.well)) && !(out.filter(r => big1536(String(r.well).trim())).length >= out.length / 2))
+    throw new ParseError(`None of the ${out.length} rows has a 96- or 384-well position (the well column “${names.well}” holds values such as “${out[0].well}”). High-density chips (Fluidigm Biomark, OpenArray) and other layouts without plate positions aren't supported.`, { recognized: names, headers, format });
   if (malformed.length > out.length)
     throw new ParseError(`${malformed.length} of ${malformed.length + out.length} data rows could not be parsed, so no checks were run.`, { recognized: names, headers, format, malformed });
   // Some exports (e.g. SDS 2.x) number wells 1..N without positions. Positions depend on the plate size,
@@ -761,7 +795,7 @@ export function parseCurves(input, kind, opts = {}) {
   const rows = hi > 0 ? all.slice(hi) : all;
   if (rows.length < 2) throw new ParseError("The curve file has no data rows.");
   const hdr = rows[0].cells.map(s => s.trim()), norm = hdr.map(normHeader);
-  const find = list => { for (const a of list) { const i = norm.indexOf(a); if (i >= 0) return i; } return -1; };
+  const find = list => { for (const a of list) { const i = norm.indexOf(normHeader(a)); if (i >= 0) return i; } return -1; };
   const xi = find(X_ALIASES[kind]);
   if (xi < 0) throw new ParseError(`No ${kind === "amp" ? "cycle" : "temperature"} column was found.`, { headers: hdr.filter(Boolean) });
   const wi = find([...FIELD_ALIASES.well, "samplepos"]), ti = find(FIELD_ALIASES.target);
@@ -815,9 +849,15 @@ export function parseCurves(input, kind, opts = {}) {
   let guessedValueType = null;
   if (kind === "melt") {
     if (layout === "long") guessedValueType = /deriv|df\/dt|d\(rfu\)|rn'/i.test(yName) ? "derivative" : "fluorescence";
-    else { // raw melt fluorescence falls steadily with temperature; derivative curves peak
-      const falling = Object.values(series).filter(s => s.length > 4 && s[0][1] > 2 * Math.abs(s[s.length - 1][1]) && s[0][1] > 0).length;
-      guessedValueType = falling > Object.keys(series).length / 2 ? "fluorescence" : "derivative";
+    else { // raw melt fluorescence is highest at the start and falls; a derivative peaks well inside the range
+      // (a CFX "Melt Curve Derivative Results" curve also starts higher than it ends, so that alone doesn't decide it)
+      const peaked = Object.values(series).filter(s => {
+        if (s.length < 8) return false;
+        let im = 0; for (let i = 1; i < s.length; i++) if (s[i][1] > s[im][1]) im = i;
+        const top = s[im][1];
+        return im > s.length * 0.1 && im < s.length * 0.9 && top > 3 * Math.abs(s[0][1]) && top > 3 * Math.abs(s[s.length - 1][1]);
+      }).length;
+      guessedValueType = peaked > Object.keys(series).length / 2 ? "derivative" : "fluorescence";
     }
   }
   const wells = [...new Set(Object.keys(series).map(k => k.split("|")[0]))].sort((a, b) => wellOrder(a) - wellOrder(b));
@@ -1462,7 +1502,8 @@ export function analyze(exp) {
     for (const [t, rs] of groupBy(tmRows.filter(r => ["sample", "positive", "standard"].includes(r.role) && ctNum(r.ct, r.dc) !== null), r => r.target)) {
       const medTm = median(rs.map(r => toNum(r.tm, r.dc)));
       for (const r of rs) {
-        const tm = toNum(r.tm, r.dc), tm2 = toNum(r.tm2, r.dc);
+        // A Tm2 of 0 (or below) is how some software writes "no second peak".
+        const tm = toNum(r.tm, r.dc), tm2v = toNum(r.tm2, r.dc), tm2 = tm2v !== null && tm2v > 0 ? tm2v : null;
         if (Math.abs(tm - medTm) > v.meltTmTolerance + 1e-9) add("melt_tm_deviation", r.line, { ...at(r),
           description: `Melt Tm for ${name(r)} is ${tm.toFixed(2)} °C; the median for '${t}' is ${medTm.toFixed(2)} °C.`,
           evidence: `Tm column ${r.tm}; difference ${(tm - medTm).toFixed(2)} °C; tolerance ±${v.meltTmTolerance} °C`,

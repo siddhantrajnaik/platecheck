@@ -59,26 +59,39 @@ export function rdmlRuns(xml) {
     const group = Object.entries(ann).find(([p]) => GROUP_PROPS.test(p))?.[1] || "";
     const q = kid(s, "quantity");
     const bio = Object.entries(ann).find(([p]) => /^biological unit$/i.test(p))?.[1] || "";
-    samples[s.attrs.id] = { type: txt(s, "type") || "unkn", quantity: q ? txt(q, "value") : "", unit: q ? txt(q, "unit") : "", group, bio };
+    samples[s.attrs.id] = { type: txt(s, "type") || "unkn", quantity: q ? txt(q, "value") : "", unit: q ? txt(q, "unit") : "", group, bio, desc: txt(s, "description") };
   }
+  // LightCycler 96 makes the sample id a UUID and keeps the name the user typed in <description>. Show that name when
+  // every such sample has a short, distinct one; otherwise keep the ids (they are what other RDML tools show).
+  const uuidLike = id => /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i.test(id);
+  const named = Object.entries(samples).filter(([id, s]) => uuidLike(id) && s.desc && s.desc.length <= 80 && !/\n/.test(s.desc));
+  const sampleName = id => samples[id]?.display || id;
+  if (named.length && new Set(named.map(([, s]) => s.desc)).size === named.length && !named.some(([, s]) => s.desc in samples)) for (const [, s] of named) s.display = s.desc;
   const dyes = Object.fromEntries(kids(doc, "dye").map(d => [d.attrs.id, txt(d, "dyeChemistry")]));
   const targets = Object.fromEntries(kids(doc, "target").map(t => [t.attrs.id, { type: txt(t, "type") || "toi", eff: txt(t, "amplificationEfficiency"), chemistry: dyes[kid(t, "dyeId")?.attrs.id] || "" }]));
+  // LightCycler 96 target ids are "<dye>@<gene>" ("SYBR Green I@hmuY"): show the gene, if that keeps every target distinct.
+  const short = id => { const m = /^(.+?)@(.+)$/.exec(id); return m && m[1] in dyes ? m[2] : id; };
+  const tShort = Object.keys(targets).map(short), tName = new Set(tShort).size === tShort.length ? short : id => id;
   const runs = [];
   for (const ex of kids(doc, "experiment")) for (const run of kids(ex, "run")) {
     const f = kid(run, "pcrFormat"), fmt = { rows: txt(f, "rows"), columns: txt(f, "columns"), rowLabel: txt(f, "rowLabel") || "ABC", columnLabel: txt(f, "columnLabel") || "123" };
     const res = [["Well", "Sample", "Target", "Task", "Quantity", "Cq", "Group", "Omit", "Chemistry", "Biological Unit"]], amp = [["Well", "Target", "Cycle", "Fluorescence"]], melt = [["Well", "Target", "Temperature", "Fluorescence"]];
-    let withCq = 0, n = 0, opt = 0, a = 0, mm = 0;
+    let withCq = 0, n = 0, opt = 0, a = 0, mm = 0, beyond = 0;
     const curves = []; // for LinRegPCR when the run has curves but no Cq
     for (const re of kids(run, "react")) {
       const well = label(fmt, re.attrs.id), sid = kid(re, "sample")?.attrs.id ?? "", s = samples[sid] || { type: "unkn", quantity: "", group: "" };
       if (s.type === "opt") { opt++; continue; }
       for (const d of kids(re, "data")) {
-        const tar = kid(d, "tar")?.attrs.id ?? "", cqRaw = txt(d, "cq"), cq = cqRaw === "" || +cqRaw < 0 ? "Undetermined" : cqRaw, excl = txt(d, "excl");
-        n++; if (cqRaw !== "" && +cqRaw >= 0) withCq++;
-        res.push([well, sid, tar, TYPE[s.type] || "Unknown", s.type === "std" ? s.quantity : "", cq, s.group, excl ? "TRUE" : "", targets[tar]?.chemistry || "", s.bio || ""]);
+        // No Cq is written as nothing, −1 (RDML) or 100 (LightCycler 96, for wells it calls negative): a Cq beyond the
+        // last cycle of the run can't be real, and without curves 100 or more is taken as no Cq too.
+        const lastCyc = kids(d, "adp").reduce((m, p) => Math.max(m, +txt(p, "cyc") || 0), 0);
+        const tid = kid(d, "tar")?.attrs.id ?? "", tar = tName(tid), cqRaw = txt(d, "cq"), noCq = cqRaw === "" || +cqRaw < 0 || (lastCyc ? +cqRaw > lastCyc + 0.5 : +cqRaw >= 100);
+        const cq = noCq ? "Undetermined" : cqRaw, excl = txt(d, "excl");
+        n++; if (!noCq) withCq++; else if (cqRaw !== "" && +cqRaw >= 0) beyond++;
+        res.push([well, sampleName(sid), tar, TYPE[s.type] || "Unknown", s.type === "std" ? s.quantity : "", cq, s.group, excl ? "TRUE" : "", targets[tid]?.chemistry || "", s.bio || ""]);
         const fluor = [];
         for (const p of kids(d, "adp")) { amp.push([well, tar, txt(p, "cyc"), txt(p, "fluor")]); a++; const i = Math.ceil(+txt(p, "cyc")) - 1; if (i >= 0 && i < 1000) fluor[i] = +txt(p, "fluor"); }
-        curves.push({ row: res.length - 1, key: well, target: tar, type: s.type, excluded: !!excl, chemistry: targets[tar]?.chemistry, fluor: Array.from(fluor, x => x ?? NaN) });
+        curves.push({ row: res.length - 1, key: well, target: tar, type: s.type, excluded: !!excl, chemistry: targets[tid]?.chemistry, fluor: Array.from(fluor, x => x ?? NaN) });
         for (const p of kids(d, "mdp")) { melt.push([well, tar, txt(p, "tmp"), txt(p, "fluor")]); mm++; }
       }
     }
@@ -91,9 +104,10 @@ export function rdmlRuns(xml) {
     }
     if (lr) w.push(`This run had amplification curves but no Cq values, so PlateCheck worked out Cq from the raw curves with LinRegPCR (per-well baseline, one common threshold of ${+lr.threshold.toPrecision(4)}, each target's mean efficiency; Ruijter et al. 2009). ${withCq} of ${n} reactions got a Cq${withCq < n ? "; the rest did not amplify" : ""}. The per-well efficiencies are on the Review step.`);
     else if (!withCq && n) w.push(`This run has ${a ? "amplification curves but " : ""}no Cq values, and PlateCheck's checks start from Cq values. Export the run with Cq values from your instrument software or from RDML-Tools (LinRegPCR), then load that file.`);
-    else if (withCq < n) w.push(`${n - withCq} of ${n} reactions have no Cq in the RDML file (missing or −1); they are read as Undetermined.`);
+    else if (withCq < n) w.push(`${n - withCq} of ${n} reactions have no Cq in the RDML file (missing or −1${beyond ? `, or a Cq beyond the run's last cycle such as the LightCycler 96's 100 for negative wells: ${beyond}` : ""}); they are read as Undetermined.`);
+    if (named.some(([, s]) => s.display)) w.push("Sample names were taken from each sample's description: the file's sample ids are codes (as the LightCycler 96 writes them).");
     if (opt) w.push(`${opt} optical calibrator reaction(s) (sample type "opt") were left out.`);
-    const refs = [...new Set(res.slice(1).map(r => r[2]))].filter(t => targets[t]?.type === "ref");
+    const refs = [...new Set(res.slice(1).map(r => r[2]))].filter(t => Object.keys(targets).some(id => tName(id) === t && targets[id].type === "ref"));
     runs.push({ id: run.attrs.id, experiment: ex.attrs.id, reactions: n, withCq, references: refs, warnings: [...w, ...warnings],
       results: plainCsv(res), amp: a ? plainCsv(amp) : null, melt: mm ? plainCsv(melt) : null, rows: +fmt.rows || 8, columns: +fmt.columns || 12 });
   }
