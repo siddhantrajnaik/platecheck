@@ -256,6 +256,11 @@ dialog form { margin-top: 16px; }
 
 /* credit */
 .credit p { margin: 0 0 4px; }
+.credit .contributors { margin: 0 0 6px; }
+.credit .contributors summary { cursor: pointer; color: var(--muted); width: fit-content; }
+.credit .contributors summary:hover { color: inherit; }
+.credit .contributors ul { margin: 4px 0 0; padding-left: 1.1em; }
+.credit .contributors li { margin: 0 0 2px; }
 .side-credit { font-size: .8rem; color: var(--muted); padding-top: 12px; border-top: 1px solid var(--rule); }
 .welcome-credit { grid-column: 1 / -1; font-size: .75rem; line-height: 1.5; color: var(--muted); padding-top: 14px; border-top: 1px solid var(--rule-soft); }
 .welcome-credit p { margin: 0 0 2px; }

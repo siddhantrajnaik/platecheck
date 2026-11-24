@@ -249,8 +249,7 @@ export function reportPdfDoc(exp, res, { generatedAt = new Date().toISOString() 
     heading("Limits of this report", sec),
     bullets(LIMITATIONS),
     exp.feedback ? { text: `Asked whether this review was useful: ${exp.feedback.value.toLowerCase()}.`, style: "muted" } : [],
-    { text: [`Made with PlateCheck ${APP_VERSION} (build ${BUILD}), by ${CREDIT.name}, ${CREDIT.affiliation}. Questions: `, { text: CREDIT.email, link: `mailto:${CREDIT.email}`, color: ACCENT }, ".",
-      CREDIT.guidance?.length ? ` With guidance from ${CREDIT.guidance.map(g => `${g.name}, ${g.affiliation}`).join("; ")}.` : ""], style: "muted", margin: [0, 18, 0, 0] },
+    { text: [`Made with PlateCheck ${APP_VERSION} (build ${BUILD}), by ${CREDIT.name}, ${CREDIT.affiliation}. Questions: `, { text: CREDIT.email, link: `mailto:${CREDIT.email}`, color: ACCENT }, "."], style: "muted", margin: [0, 18, 0, 0] },
   ].filter(x => x !== false && x !== null && x !== undefined);
 
   return {

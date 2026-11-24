@@ -61,6 +61,6 @@ Questions, bugs, or a file it can't read: **siddhantrajnaik2001@gmail.com**
 
 LinkedIn: [siddhant-raj-naik](https://www.linkedin.com/in/siddhant-raj-naik-22065b205)
 
-With guidance from **Sanket Mukherjee**, PhD, KSBS, IIT Delhi (smukherjee109@gmail.com).
+More contributors: Sanket Mukherjee, PhD, KSBS, IIT Delhi (smukherjee109@gmail.com).
 
 PlateCheck is released under the MIT License ([LICENSE](LICENSE)). It is built with three.js (MIT), SheetJS for reading Excel files (Apache-2.0, `web/vendor/xlsx-LICENSE`), pdfmake for the PDF report (MIT, `web/vendor/pdfmake-LICENSE`) and IBM Plex fonts (SIL OFL).

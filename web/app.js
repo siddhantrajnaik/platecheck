@@ -119,7 +119,8 @@ function plateArt(rows, cols, lit = {}, r = 4.2) {
 function creditBlock(cls) {
   return h("div", { class: "credit " + cls },
     h("p", null, `Made by ${CREDIT.name}, ${CREDIT.affiliation}.`),
-    CREDIT.guidance?.length > 0 && h("p", null, "With guidance from ", CREDIT.guidance.map((g, i) => [i ? ", " : "", `${g.name}, ${g.affiliation} (`, h("a", { href: `mailto:${g.email}`, class: "link" }, g.email), ")"]), "."),
+    CREDIT.contributors?.length > 0 && h("details", { class: "contributors" }, h("summary", null, "More contributors"),
+      h("ul", null, CREDIT.contributors.map(g => h("li", null, `${g.name}, ${g.affiliation}`, g.email ? [" (", h("a", { href: `mailto:${g.email}`, class: "link" }, g.email), ")"] : "")))),
     h("p", null, "Questions, bugs or a file it can't read? Email me at ", h("a", { href: `mailto:${CREDIT.email}?subject=PlateCheck`, class: "link" }, CREDIT.email), "."),
     CREDIT.linkedin && h("p", null, h("a", { href: CREDIT.linkedin, class: "link", target: "_blank", rel: "noopener" }, "LinkedIn")),
     h("p", { class: "fine" }, `Version ${C.APP_VERSION}, build ${C.BUILD}.`));
