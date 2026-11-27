@@ -102,7 +102,7 @@ export function rdmlRuns(xml) {
       if (lr) { const by = new Map(lr.rows.map(x => [`${x.key}|${x.target}`, x]));
         for (const c of curves) { const x = by.get(`${c.key}|${c.target}`); if (x?.cq != null) { res[c.row][5] = x.cq.toFixed(3); withCq++; } } }
     }
-    if (lr) w.push(`This run had amplification curves but no Cq values, so PlateCheck worked out Cq from the raw curves with LinRegPCR (per-well baseline, one common threshold of ${+lr.threshold.toPrecision(4)}, each target's mean efficiency; Ruijter et al. 2009). ${withCq} of ${n} reactions got a Cq${withCq < n ? "; the rest did not amplify" : ""}. The per-well efficiencies are on the Review step.`);
+    if (lr) w.push(`This run had amplification curves but no Cq values, so PlateCheck worked out Cq from the raw curves with LinRegPCR (per-well baseline, one common threshold of ${+lr.threshold.toPrecision(4)}, each target's mean efficiency; Ruijter et al. 2009). ${withCq} of ${n} reactions got a Cq${withCq < n ? "; the rest got no Cq (no rise above the common threshold): check their curves on the Review step" : ""}. The per-well efficiencies are on the Review step.`);
     else if (!withCq && n) w.push(`This run has ${a ? "amplification curves but " : ""}no Cq values, and PlateCheck's checks start from Cq values. Export the run with Cq values from your instrument software or from RDML-Tools (LinRegPCR), then load that file.`);
     else if (withCq < n) w.push(`${n - withCq} of ${n} reactions have no Cq in the RDML file (missing or −1${beyond ? `, or a Cq beyond the run's last cycle such as the LightCycler 96's 100 for negative wells: ${beyond}` : ""}); they are read as Undetermined.`);
     if (named.some(([, s]) => s.display)) w.push("Sample names were taken from each sample's description: the file's sample ids are codes (as the LightCycler 96 writes them).");
@@ -150,7 +150,9 @@ export async function readRdml(name, bytes) {
 }
 
 // ---- export: the run as RDML 1.3 (element order as in the RDML 1.3 schema).
-const xmlEsc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" }[c]));
+// Characters XML 1.0 forbids (control characters other than tab and line breaks) are dropped, so the file stays valid
+// for strict readers such as rdmlpython; they can come from a pasted name in a CSV.
+const xmlEsc = s => String(s ?? "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]/g, "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" }[c]));
 const ROLE_TYPE = { sample: "unkn", ntc: "ntc", nrt: "nrt", positive: "pos", standard: "std" };
 const idOk = s => String(s ?? "").trim() || "unnamed";
 export function rdmlXml(exp, res, { now = new Date().toISOString().slice(0, 19) } = {}) {

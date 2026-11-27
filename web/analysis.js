@@ -337,7 +337,7 @@ export function compute(records, settings, { stdCurves = [], plates = [""], cali
   const groupsSeen = uniq(records.map(r => r.group).filter(Boolean));
   const refs = s.refs.filter(t => allTargets.includes(t));
   const missingRefs = s.refs.filter(t => !allTargets.includes(t));
-  if (missingRefs.length) warnings.push(`Reference gene${missingRefs.length > 1 ? "s" : ""} ${missingRefs.join(", ")} ${missingRefs.length > 1 ? "have" : "has"} no usable sample wells and ${missingRefs.length > 1 ? "were" : "was"} not used.`);
+  if (missingRefs.length) warnings.push(`Reference gene${missingRefs.length > 1 ? "s" : ""} ${missingRefs.join(", ")} ${missingRefs.length > 1 ? "have" : "has"} no usable sample wells and ${missingRefs.length > 1 ? "were" : "was"} not used. Check that their sample wells have Ct values and the Sample role on the Plate step, or pick another reference.`);
   if (!refs.length) needs.push("refs");
   const control = groupsSeen.includes(s.control) ? s.control : "";
   if (!control) needs.push("control");
@@ -360,7 +360,7 @@ export function compute(records, settings, { stdCurves = [], plates = [""], cali
     u.ref = have.length === refs.length ? mean(refs.map(r => w(r) * u.t[r].ct)) : null;
     if (u.ref === null) noRef.push(`${u.unit} (no ${refs.filter(r => !u.t[r]).join(", ")})`);
   }
-  if (noRef.length) warnings.push(`${noRef.length} biological unit(s) lack a reference gene value and were left out: ${list(noRef)}.`);
+  if (noRef.length) warnings.push(`${noRef.length} biological unit(s) lack a reference gene value and were left out: ${list(noRef)}. Check those wells on the Review step (no Ct/Cq, or Not used), or choose a reference measured in every unit.`);
 
   // Reference stability: does the reference Ct differ between groups?
   for (const r of refs) {

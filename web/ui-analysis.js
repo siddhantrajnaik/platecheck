@@ -358,7 +358,7 @@ function resultsBlock(ax, a, base) {
 // ---------------------------------------------------------------- the Analysis step of a run
 export function analysisView(ax) {
   const { h, card, st, C } = ax;
-  if (!st.res?.rows?.length) return [card(h("p", null, "Upload a results file first; the analysis works from its Ct values."))];
+  if (!st.res?.rows?.length) return [card(h("p", null, "Load a results file first; the analysis works from its Ct values."))];
   const s = st.exp.analysis || C.cleanAnalysisSettings({}), ch = A.choices(st.res);
   const set = (patch, detail) => ax.change("analysis.edit", detail, () => { st.exp.analysis = C.cleanAnalysisSettings({ ...s, ...patch }); });
   if (!s.on) return [card(h("h2", null, "Analysis"),
@@ -418,7 +418,7 @@ export function enrichmentPlot(r, row) {
   const hits = row.genes.map(g => at.get(g)).filter(Number.isInteger).sort((x, y) => x - y), rs = GS.runningSum(values, hits);
   const lead = new Set(row.leading);
   const W = 540, L = 58, R = W - 16, T = 34, B = 196, tk0 = 204, tk1 = 228, s0 = 240, s1 = 300;
-  const note = wrapWords(`${r.method === "gsea" ? `ES = ${fmt(row.es, 3)}, NES = ${fmt(row.nes)}, p ${row.p === 0 ? "" : "= "}${GSfp(row.p, r.nperm)}, FDR q = ${GSfp(row.q)} (${r.nperm} permutations)` : `Rank test: AUC = ${fmt(row.auc)}, p = ${GSfp(row.p)}, q (BH) = ${GSfp(row.q)}; ES = ${fmt(row.es, 3)}`}. ${row.size} of the ${N} ranked panel genes are in the set; vermillion ticks are the leading edge. Universe: the panel.`, Math.floor((W - 20) / 5.2));
+  const note = wrapWords(`${r.method === "gsea" ? `ES = ${fmt(row.es, 3)}, NES = ${fmt(row.nes)}, p ${row.p === 0 ? "" : "= "}${GSfp(row.p, r.nperm)}, FDR q = ${GSfp(row.q)} (${r.nperm} permutations)` : `Rank test: AUC = ${fmt(row.auc)}, p = ${GSfp(row.p)}, q (BH) = ${GSfp(row.q)}; ES = ${fmt(row.es, 3)}`}. ${row.size} of the ${N} ranked panel genes are in the set; vermilion ticks are the leading edge. Universe: the panel.`, Math.floor((W - 20) / 5.2));
   const H = s1 + 40 + note.length * 13;
   const X = i => L + ((i + 0.5) / N) * (R - L);
   const svg = el("svg", { xmlns: NS, width: W, height: H, viewBox: `0 0 ${W} ${H}`, "font-family": FONT, role: "img", "aria-label": `Enrichment plot for ${row.name}` });

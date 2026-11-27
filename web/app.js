@@ -153,9 +153,9 @@ function renderSidebar() {
 }
 
 // Four everyday steps; the rest lives under "More" unless "Show all steps" is on.
-const TABS = [["setup", "Rename or delete", 1], ["data", "Upload", 2], ["map", "Plate", 3], ["context", "Method details", 4],
+const TABS = [["setup", "Rename or delete", 1], ["data", "Files", 2], ["map", "Plate", 3], ["context", "Method details", 4],
   ["findings", "Review", 5], ["analysis", "Analysis", 6], ["report", "Report", 7], ["assay", "Assay calculations", null], ["compare", "Compare runs", null]]; // "analysis": analysis module; "assay": workstream 4
-const SIMPLE_TABS = [["data", "Upload"], ["map", "Plate"], ["findings", "Review"], ["analysis", "Analysis"], ["report", "Report"]];
+const SIMPLE_TABS = [["data", "Files"], ["map", "Plate"], ["findings", "Review"], ["analysis", "Analysis"], ["report", "Report"]];
 const MORE_TABS = [["context", "Method details and thresholds"], ["assay", "Assay calculations (ChIP, MSRE, 3C…)"], ["compare", "Compare with another run"], ["setup", "Rename or delete this run"]]; // "assay": workstream 4
 const tabLabel = k => (S.getSetting("allSteps") ? TABS : [...SIMPLE_TABS, ...MORE_TABS]).find(t => t[0] === k)[1];
 function goTab(k) { if (k !== st.tab) { st.sel = new Set(); st.selFinding = null; } st.tab = k; renderMain(); scrollTo(0, 0); }
@@ -253,7 +253,7 @@ function home() {
         h("li", null, "Combines plates from one experiment, and does the sums for ChIP, methylation, accessibility and other qPCR-based assays."),
         h("li", null, "Gives you graphs for a paper and a report to keep with your notebook."))),
       h("details", null, h("summary", null, "What it doesn't do"), h("ul", { class: "hm-body" },
-        h("li", null, "It doesn't upload your data. Everything stays in this browser; only gene names go out, and only if you press “Look up genes”."),
+        h("li", null, "It doesn't upload your data. Everything stays in this browser; only gene symbols and their species go out (to MyGene.info, or HGNC as a fallback), and only if you press “Look up genes”."),
         h("li", null, "It doesn't decide whether your experiment worked or which reference genes to use. You make those calls."),
         h("li", null, "It hasn't been checked on every instrument and assay. Look at the preview of your file, and compare the numbers on your first few runs."))),
       h("details", null, h("summary", null, "How it goes"), h("ol", { class: "hm-body" },
@@ -329,7 +329,7 @@ function quickNote() {
   if (!q || q.id !== st.exp.id || !st.exp.source) return null;
   return h("div", { class: "quick-note" },
     h("p", null, `Read ${q.rows} rows from ${q.files[0]}` + (q.curvesOf?.length ? `, with its ${q.curvesOf.join(" and ")} curves` : q.files.length > 1 ? `, plus the curves in ${q.files.slice(1).join(" and ")}` : "") + "." +
-      (q.melt ? ` Melt values were read as ${q.melt === "derivative" ? "a derivative (−dF/dT)" : "raw fluorescence"}; if that's wrong, change “These values are” on the melt file's card on the Upload page.` : "") + (q.skipped.length ? ` I couldn't read ${q.skipped.join(", ")}, so it was left out.` : "")),
+      (q.melt ? ` Melt values were read as ${q.melt === "derivative" ? "a derivative (−dF/dT)" : "raw fluorescence"}; if that's wrong, change “These values are” on the melt file's card on the Files step.` : "") + (q.skipped.length ? ` I couldn't read ${q.skipped.join(", ")}, so it was left out.` : "")),
     (q.rdml || []).map(t => h("p", { class: "warn-line" }, t)),
     q.otherSheets?.why ? h("p", { class: "warn-line" }, q.otherSheets.why) : q.otherSheets && h("p", { class: "warn-line" }, `Check the sheet: this workbook has other sheets that also look like results (${q.otherSheets.others.map(s => `“${s}”`).join(", ")}). I used “${q.otherSheets.used}”. If that's the wrong one, open the Upload page, click Replace and pick the right sheet.`),
     h("div", { class: "row" },
@@ -403,9 +403,9 @@ VIEWS.setup = () => {
         line("Operator", textInput(e.operator, setExp("operator", "Operator"))),
         line("Project", textInput(e.project, setExp("project", "Project"), { placeholder: "Optional" }))),
       h("div", { class: "row", style: "margin-top:1rem" }, h("button", { class: "btn primary", type: "button", onclick: () => { st.tab = "data"; renderMain(); } }, "Continue to Data"))),
-    h("section", { class: "sec danger" }, h("h3", null, "Delete experiment"),
-      h("p", { class: "muted" }, "This removes the experiment and everything saved with it from this browser. Download the experiment packet first if you want to keep a copy."),
-      h("button", { class: "btn danger", type: "button", onclick: deleteExp }, "Delete experiment…"))];
+    h("section", { class: "sec danger" }, h("h3", null, "Delete run"),
+      h("p", { class: "muted" }, "This removes the run and everything saved with it from this browser. Download the experiment packet first if you want to keep a copy."),
+      h("button", { class: "btn danger", type: "button", onclick: deleteExp }, "Delete run…"))];
 };
 
 // ---------------------------------------------------------------- 2 · Data (FR-2, FR-3, FR-26)
@@ -1057,7 +1057,7 @@ VIEWS.analysis = () => analysisView(AX());
 
 // ---------------------------------------------------------------- 6 · Report & export (FR-19..FR-21)
 VIEWS.report = () => {
-  if (!st.res) return [emptyCard("Upload a results file first, then come back here for the report.", "data")];
+  if (!st.res) return [emptyCard("Load a results file first, then come back here for the report.", "data")];
   const base = (st.exp.title || st.exp.id).replace(/[^\w.-]+/g, "_").slice(0, 60).replace(/^_+|_+$/g, "") || st.exp.id; // no stray "_" from a closing bracket
   const frame = h("iframe", { class: "report-frame", sandbox: "allow-same-origin allow-modals", title: "Report preview" });
   frame.srcdoc = R.reportHtml(st.exp, st.res);
@@ -1131,7 +1131,7 @@ VIEWS.compare = () => {
     card(h("h2", null, "Mean Ct/Cq by biological unit and target"), tbl(["Target", "Biological unit", `${A}: mean (SD)`, `${B}: mean (SD)`, "Difference (B − A)"],
       c.groups.map(g => h("tr", null, h("td", null, g.target), h("td", null, g.unit), h("td", { class: "num" }, `${fmt(g.a)} (${fmt(g.sdA, 3)})`), h("td", { class: "num" }, `${fmt(g.b)} (${fmt(g.sdB, 3)})`), h("td", { class: "num" }, fmt(g.delta)))))),
     card(h("h2", null, "Controls"), tbl(["Target", "Control", A, B], c.controls.map(x => h("tr", { class: x.a === x.b ? "" : "diff" }, h("td", null, x.target), h("td", null, x.label), h("td", null, x.a), h("td", null, x.b))))),
-    card(h("h2", null, "Findings by severity"), tbl(["Severity", A, B], C.SEVERITIES.map(s => h("tr", null, h("td", null, s), h("td", { class: "num" }, c.counts.a[s] || 0), h("td", { class: "num" }, c.counts.b[s] || 0))))));
+    card(h("h2", null, "Flags by severity"), tbl(["Severity", A, B], C.SEVERITIES.map(s => h("tr", null, h("td", null, s), h("td", { class: "num" }, c.counts.a[s] || 0), h("td", { class: "num" }, c.counts.b[s] || 0))))));
   return out;
 };
 
@@ -1151,3 +1151,9 @@ catch (err) {
   render();
   flash(`Couldn't open “${first?.title || "the last run"}” (${err?.message || err}). It is still saved; open it from the list, or export it from there and report the problem.`, true);
 }
+
+// Clickable table rows (replicate sets, LinRegPCR wells) work from the keyboard too: Enter or Space on a focused row.
+document.addEventListener("keydown", ev => {
+  const row = ev.target?.closest?.("tr.click");
+  if (row && (ev.key === "Enter" || ev.key === " ") && ev.target === row) { ev.preventDefault(); row.click(); }
+});

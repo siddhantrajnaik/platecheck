@@ -165,7 +165,7 @@ test("RNA type: the type set in the Genes step wins over the guess from the name
   assert.equal(by(res, "lncrna_no_nrt").length, 0);
   assert.equal(by(res, "mirna_no_small_rna_reference").length, 0);
   const set = run(rnaPlate(), { targets: { GAPDH: { type: "lncRNA" } } });
-  assert.ok(by(set, "lncrna_no_nrt").some(f => /set in Genes/.test(f.evidence)));
+  assert.ok(by(set, "lncrna_no_nrt").some(f => /set in the Targets panel/.test(f.evidence)));
 });
 
 // ------------------------------------------------------------------ defaults leave earlier results alone

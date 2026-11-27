@@ -90,7 +90,7 @@ Several candidate columns: if more than one column could be the Ct/Cq column (or
 
 Excel workbooks with several sheets that look like results: a sheet named exactly `Results` (or `Ct Results`, `Cq Results`) is preferred over one that only contains the word, such as `Old results`. When more than one sheet qualifies, the note after import names the others so you can switch.
 
-Import template: `well,sample,target,ct,role,group,bio_unit,quantity` (downloadable from the Upload step).
+Import template: `well,sample,target,ct,role,group,bio_unit,quantity` (downloadable from the Files step).
 
 ### Amplification and melt curves (optional)
 - The header row can sit below a block of run details (as in QuantStudio Excel exports); the first row with a `Cycle` or `Temperature` column is used.

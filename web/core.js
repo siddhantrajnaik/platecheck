@@ -52,7 +52,7 @@ export const IMPORT_TEMPLATE =
 // ---------------------------------------------------------------- rule catalog
 // Severity is a property of the rule (PRD §9), not a generic score.
 const V = "0.4.0"; // rule-set version: bump when a rule is added or its logic changes
-const BASIS = "Informed by MIQE 2.0 guidance; thresholds are placeholders pending expert review.";
+const BASIS = "Informed by MIQE 2.0 guidance. The default thresholds are starting points, not yet reviewed by a qPCR expert; change them to match your lab.";
 export const RULES_REVIEW = { status: "Not yet reviewed by a qPCR domain expert", reviewed_on: null };
 export const RULES = {
   malformed_row: { group: "Structure", category: "data_issue", severity: "high", title: "Row could not be parsed",
@@ -102,7 +102,7 @@ export const RULES = {
     why: "Wide technical spread can come from pipetting, low template or an outlier well. No value was removed or down-weighted." },
   late_ct: { group: "Replicates", category: "review_warning", severity: "low", title: "Late Ct: low copy number",
     checks: "Sample replicate groups have a mean Ct/Cq at or below the late-Ct setting.",
-    why: "Past about Ct 35 a well holds roughly 10 template copies or fewer, so how many copies land in each well is down to chance. Replicates scatter, some wells stay empty, and the result is closer to detected / not detected than to a quantity. This is a note, not a fault." },
+    why: "Very late Ct values (often past about 35) usually mean very few template copies per well (often on the order of 10), so how many copies land in each well is down to chance. Replicates scatter, some wells stay empty, and the result is closer to detected / not detected than to a quantity. This is a note, not a fault." },
   missing_control: { group: "Controls", category: "missing_context", severity: "medium", title: "Expected control not found",
     checks: "Each target has the controls the selected rule set expects.",
     why: "Without the control, contamination or reaction failure for this target cannot be assessed from the data." },
@@ -159,7 +159,7 @@ export const RULES = {
     why: "A Ct without a melt product can indicate a non-specific or artefactual signal." },
   melt_multiple_peaks: { group: "Melt curve", category: "review_warning", severity: "medium", title: "More than one melt peak",
     checks: "Each well has one main melt peak; secondary peaks at least the configured fraction of the main peak are flagged.",
-    why: "Additional peaks can indicate non-specific products or primer-dimer, which would contribute to the Ct." },
+    why: "Additional peaks can indicate non-specific products or primer-dimer, which may contribute to the Ct." },
   melt_tm_deviation: { group: "Melt curve", category: "review_warning", severity: "low", title: "Melt temperature differs from the target",
     checks: "The main peak Tm is within the configured tolerance of the target's median Tm.",
     why: "A shifted Tm can indicate a different product, or a salt or volume difference in that well." },
@@ -517,7 +517,7 @@ const FIELD_ALIASES = {
   sample: ["sample", "sample name", "samplename", "name"],
   target: ["target", "target name", "detector", "detector name", "gene", "assay"],
   ct: ["ct", "cq", "cт", "c_t", "crt", "cp", "c_"], // "C_": StepOne Software writes CT with a subscript T that some exports turn into "_"
-  role: ["role", "task", "content", "type", "sample type"],
+  role: ["role", "task", "content", "type", "sample type", "well type"],
   quantity: ["quantity", "starting quantity (sq)", "sq", "qty"],
   group: ["group", "condition", "biological group", "biological set name"],
   bio_unit: ["bio_unit", "biological unit", "biological replicate", "bio rep"],
@@ -547,6 +547,8 @@ function mapHeaders(headers) {
   for (const [field, aliases] of Object.entries(FIELD_ALIASES))
     for (const a of aliases) { const i = norm.indexOf(normHeader(a)); if (i >= 0) { columns[field] = i; names[field] = headers[i].trim(); break; } }
   if (!("ct" in columns)) { const i = norm.findIndex(n => CT_DYE_RE.test(n)); if (i >= 0) { columns.ct = i; names.ct = headers[i].trim(); } }
+  // "Quantity (picograms)", "Quantity (copies)": the unit in brackets (AriaMx and others)
+  if (!("quantity" in columns)) { const i = norm.findIndex(n => /^quantity \(.+\)$/.test(n)); if (i >= 0) { columns.quantity = i; names.quantity = headers[i].trim(); } }
   const used = new Set(Object.values(columns));
   // The same column name twice (two "Ct" columns, say): the first is used and the parser warns. Different names for one
   // field ("Well" and "Well Position" in QuantStudio files) are expected; the preferred one is chosen by FIELD_ALIASES order.
@@ -634,6 +636,12 @@ export function parseResults(input, opts = {}) {
   else if (/^\s*\[results\]/im.test(preamble) || "Block Type" in metadata || (/^well position$/i.test(names.well || "") && "omit" in columns)) format = "thermo-quantstudio";
   else if (/^SDS\s|SDS v\d|\.sds\b/im.test(preamble) || /^detector( name)?$/i.test(names.target || "")) format = "abi-sds";
   else if ("fluor" in columns && /^content$/i.test(names.role || "")) format = "biorad-cfx-cq";
+  // A matched column that is empty in every row ("Target" left blank by CFX Maestro) gives way to another column with
+  // the same meaning that holds values ("Gene"), so the names in the file aren't lost.
+  for (const f of ["target", "sample"]) if (f in columns && !rows.slice(1).some(r => (r.cells[columns[f]] ?? "").trim())) {
+    const alt = header.cells.findIndex((c, i) => i !== columns[f] && FIELD_ALIASES[f].includes(normHeader(c)) && rows.slice(1).some(r => (r.cells[i] ?? "").trim()));
+    if (alt >= 0) { columns[f] = alt; names[f] = header.cells[alt].trim(); }
+  }
   const width = header.cells.length, need = Math.max(columns.well, columns.ct) + 1;
   const out = [], malformed = [], warnings = [];
   if (!blocks.length && repeatedHeaders.length) warnings.push(`The header line appears again at line${repeatedHeaders.length > 1 ? "s" : ""} ${repeatedHeaders.map(i => i + 1).join(", ")}. I skipped it and read the rows after it as well; if the file holds more than one run, check each run on its own (the same well in two runs is flagged as a duplicate).`);
@@ -1213,12 +1221,12 @@ export function analyze(exp) {
       evidence: `source line ${r.line}; currently treated as '${r.role}'`, next_check: "Assign the intended role (for example NTC or no-RT) in the plate map." });
   for (const r of rows.filter(r => r.omit))
     add("instrument_omit", r.line, { ...at(r), description: `Well ${name(r)}${r.target ? ` (${r.sample ? `${r.sample} / ` : ""}${r.target})` : ""} is marked Omit in the instrument export.`,
-      evidence: `source line ${r.line}; raw Ct ${fmtRaw(r.ct)}`, next_check: "Record why it was omitted. PlateCheck still includes it in every check; set the role to Empty if it should be left out of replicate and control checks." });
+      evidence: `source line ${r.line}; raw Ct ${fmtRaw(r.ct)}`, next_check: "Record why it was omitted. The checks still include this well (the Analysis step leaves Omit wells out by default). To drop it from the replicate and control checks too, set it to Not used on the Plate step." });
   for (const r of active) {
     const needsSample = ["sample", "positive", "nrt"].includes(r.role);
     if (!r.target || (needsSample && !r.sample))
       add("unmapped_well", r.line, { ...at(r), description: `Well ${name(r)} has no ${!r.target ? "target" : "sample"} label.`,
-        evidence: `source line ${r.line}; role ${r.role}`, next_check: "Add the label in the plate map, or mark the well empty." });
+        evidence: `source line ${r.line}; role ${r.role}`, next_check: "Add the label on the Plate step, or set the well to Not used." });
   }
   for (const r of rows) {
     if (r.role === "empty") {
@@ -1287,7 +1295,7 @@ export function analyze(exp) {
       const one = g => `${g.unit}: mean Ct ${g.mean.toFixed(2)}${g.sd !== null ? ` (SD ${g.sd.toFixed(2)}, n = ${g.n_numeric})` : ` (n = ${g.n_numeric})`}`;
       add("late_ct", t, { wells: gs.flatMap(g => g.wells), lines: gs.flatMap(g => g.lines), target: t, sample: gs.length === 1 ? gs[0].unit : null,
         description: `${gs.length} of ${sampleGroups.filter(g => g.target === t).length} sample group(s) for '${t}' have a mean Ct above ${v.lateCtThreshold}.`,
-        evidence: gs.slice(0, 12).map(one).join("; ") + (gs.length > 12 ? `; … ${gs.length - 12} more` : "") + ". About 10 copies per well reach Ct 35 at 90–100% efficiency",
+        evidence: gs.slice(0, 12).map(one).join("; ") + (gs.length > 12 ? `; … ${gs.length - 12} more` : "") + ". In many assays about 10 copies give a Ct near 35; check your own assay's limit of detection.",
         next_check: "Read these as detected or not detected rather than as exact quantities, or run more replicates or more template. If you have measured this assay's limit of quantification, set that Ct under More, then Method details and thresholds." });
     }
   } else res.notAssessed.push("Late Ct: the late-Ct note is switched off in the rule set.");
@@ -1322,7 +1330,7 @@ export function analyze(exp) {
     for (const r of ws) {
       const c = ctNum(r.ct, r.dc);
       if (role === "ntc" && c !== null) add("ntc_amplification", r.line, { ...at(r), uncertain: true, severity: c < v.ntcCtThreshold ? "high" : "medium",
-        description: `NTC well ${name(r)} for '${t}' amplified (Ct ${r.ct}).`,
+        description: `NTC well ${name(r)} reports Ct ${r.ct} for '${t}'.`,
         evidence: `source line ${r.line}; Ct ${r.ct} ${c < v.ntcCtThreshold ? "<" : "≥"} threshold ${v.ntcCtThreshold}`,
         next_check: "Review the amplification and melt curves for this well. Compare its Tm with the product; consider repeating with fresh reagents." });
       if (role === "positive" && isNoAmp(r.ct)) add("positive_control_failed", r.line, { ...at(r),
@@ -1331,9 +1339,9 @@ export function analyze(exp) {
       if (role === "nrt" && c !== null) {
         const sc = wsOf(t, "sample").map(x => ctNum(x.ct, x.dc)).filter(x => x !== null);
         const minS = sc.length ? Math.min(...sc) : null;
-        add("nrt_amplification", r.line, { ...at(r), uncertain: true, description: `No-RT control ${name(r)} for '${t}' amplified (Ct ${r.ct}).`,
+        add("nrt_amplification", r.line, { ...at(r), uncertain: true, description: `No-RT control ${name(r)} reports Ct ${r.ct} for '${t}'.`,
           evidence: `source line ${r.line}` + (minS !== null ? `; ${(c - minS).toFixed(1)} cycles after the earliest sample well (Ct ${minS})` : ""),
-          next_check: "Assess possible genomic DNA contribution, for example DNase treatment or intron-spanning primers." });
+          next_check: "Compare its Ct with the samples (see the No-RT margin check). To reduce genomic DNA, DNase-treat the RNA or use primers that span an exon junction." });
         // Margin to the samples this no-RT controls: the sample it was made from if the names say so, otherwise the whole target.
         const samples = wsOf(t, "sample").filter(x => ctNum(x.ct, x.dc) !== null);
         const names = new Set([nrtBaseName(r.sample), (r.bioSource === "file" || r.bioSource === "user") && r.bio_unit ? String(r.bio_unit).toLowerCase() : ""].filter(Boolean));
@@ -1345,7 +1353,7 @@ export function analyze(exp) {
           if (margin < v.nrtMargin - 1e-9) add("nrt_margin", r.line, { ...at(r), wells: [r.key || r.well, ...(own.length ? wl(own) : [])], lines: [r.line, ...(own.length ? ln(own) : [])], uncertain: true,
             description: `No-RT control ${name(r)} for '${t}' (Ct ${r.ct}) is ${margin.toFixed(1)} cycles after ${own.length ? `its sample ${own[0].sample ?? own[0].bio_unit}` : "the samples"} (mean Ct ${mean.toFixed(2)}); at least ${v.nrtMargin} are expected.`,
             evidence: `source line ${r.line}; ${own.length ? `matched by name to ${wl(own).join(", ")}` : `no sample name matches '${r.sample ?? ""}', so compared with all ${used.length} sample well(s) of '${t}'`}; margin ${margin.toFixed(2)} < ${v.nrtMargin} cycles; ${share}`,
-            next_check: "Treat the Ct of these samples as partly genomic DNA. DNase-treat the RNA and repeat, use primers that span an exon junction, or measure and subtract the genomic signal." });
+            next_check: "Part of these samples' signal may come from genomic DNA. DNase-treat the RNA and repeat, use primers that span an exon junction, or measure and subtract the genomic signal." });
         }
       }
     }
@@ -1357,7 +1365,7 @@ export function analyze(exp) {
   // RNA type (exp.targets, web/genes.js): the type set in the Targets panel (More, then Method details and thresholds), otherwise the guess from the name.
   // Low-severity notes only, and each target is reported by at most one of the two miRNA notes.
   const tt = new Map(targetTable(exp, active).map(x => [x.name, x]));
-  const typeOf = t => tt.get(t)?.type, typed = ts => ts.map(t => `${t} (${typeOf(t)}, ${tt.get(t)?.saved?.type ? "set in Genes" : "guessed from the name"})`).join(", ");
+  const typeOf = t => tt.get(t)?.type, typed = ts => ts.map(t => `${t} (${typeOf(t)}, ${tt.get(t)?.saved?.type ? "set in the Targets panel" : "guessed from the name"})`).join(", ");
   const sampleTargets = [...new Set(active.filter(r => r.role === "sample" && r.target).map(r => r.target))];
   const sampleWells = ts => active.filter(r => r.role === "sample" && ts.includes(r.target));
   const aRefs = exp.analysis?.on ? (exp.analysis.refs || []).filter(t => tt.has(t)) : [];
@@ -1404,7 +1412,7 @@ export function analyze(exp) {
     const levels = new Set(pts.map(p => p.x)).size;
     if (levels < v.minStdLevels) {
       add("std_curve_insufficient", t, { wells: wl(rs), target: t, description: `Standard curve for '${t}' has ${levels} usable level(s); at least ${v.minStdLevels} are needed.`,
-        evidence: `${pts.length} standard well(s) with quantity and numeric Ct`, next_check: "Check standard quantities and Ct values." });
+        evidence: `${pts.length} standard well(s) with quantity and numeric Ct`, next_check: "Enter a quantity for each standard on the Plate step, or run more dilution levels. Efficiency and R² were not worked out." });
       continue;
     }
     const fit = linfit(pts);
@@ -1488,7 +1496,7 @@ export function analyze(exp) {
     for (const [t, ds] of groupBy(diffs, d => d[0].target ?? "")) {
       const med = median(ds.map(d => d[1]));
       for (const [r, d, est, Tt] of ds) if (Math.abs(d - med) > v.ctTolerance)
-        add("amp_ct_inconsistent", r.line, { ...at(r), uncertain: true, description: `Reported Ct for ${name(r)} is ${Math.abs(d - med).toFixed(1)} cycles from where its curve suggests.`,
+        add("amp_ct_inconsistent", r.line, { ...at(r), uncertain: true, description: `Reported Ct for ${name(r)} differs by ${Math.abs(d - med).toFixed(1)} cycles from what its curve and the other wells of the target suggest.`,
           evidence: `reported Ct ${r.ct}; curve crosses ${Tt.toFixed(3)} above baseline at cycle ${est.toFixed(2)}; offset ${d.toFixed(2)} vs median offset ${med.toFixed(2)}${t ? ` for '${t}'` : ""}`,
           next_check: "Compare this well's curve with its replicates, and check for per-well baseline settings." });
     }

@@ -170,7 +170,7 @@ export function reportPdfDoc(exp, res, { generatedAt = new Date().toISOString() 
     { canvas: [{ type: "line", x1: 0, y1: 0, x2: 483, y2: 0, lineWidth: 0.6, lineColor: RULE }], margin: [0, 14, 0, 12] },
     { table: { widths: [3, "*"], body: [[{ text: "", fillColor: STATUS[s.status] || MUTE }, { stack: [
       { text: [{ text: `${s.label}. `, bold: true, color: STATUS[s.status] || INK, fontSize: 11 },
-        { text: !p ? "No results file was imported, so nothing was checked." : main.length + info.length ? `${s.reviewed} of ${s.total} findings reviewed, ${s.open} still open.` : "Nothing was flagged by the checks that ran.", fontSize: 10 }] },
+        { text: !p ? "No results file was imported, so nothing was checked." : res.findings.length ? `${s.reviewed} of ${s.total} findings reviewed, ${s.open} still open.` : "Nothing was flagged by the checks that ran.", fontSize: 10 }] },
       { text: "These are things PlateCheck thought worth a second look. It doesn't certify the experiment or its conclusions, and anything listed under “Not checked” wasn't looked at.", style: "muted", margin: [0, 3, 0, 0] }] }]] },
       layout: { hLineWidth: () => 0, vLineWidth: () => 0, paddingLeft: i => (i ? 10 : 0), paddingRight: () => 0, paddingTop: () => 2, paddingBottom: () => 2 } },
     { columns: counts.map(([k, v, c]) => ({ stack: [{ text: String(v ?? 0), fontSize: 15, color: v ? c : RULE, bold: !!v }, { text: k, fontSize: 7, color: MUTE }] })), margin: [0, 16, 0, 16] },
